@@ -1,3 +1,5 @@
+// Ver onde eu dei o comit e acertar com a paola como iremos subir para o git(branch)
+
 import {
   View,
   Text,
