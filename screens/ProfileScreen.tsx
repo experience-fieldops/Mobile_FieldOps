@@ -4,7 +4,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   StatusBar,
-  Alert,
 } from 'react-native';
 import {
   WifiOff,
@@ -79,19 +78,13 @@ export default function ProfileScreen() {
   const displayOrg = user?.organization ?? '—';
   const initials = user?.name ? getInitials(user.name) : '?';
 
+  // Observação: o Alert.alert do react-native-web é um stub vazio (no-op),
+  // então a confirmação nunca aparecia na web e o logout() nunca era chamado.
+  // Por ora chamamos logout() direto, garantindo que o botão funcione em todas
+  // as plataformas. Se quiser a confirmação "Tem certeza?", dá pra adicionar
+  // um Modal personalizado (funciona em web e nativo) depois.
   function handleLogout() {
-    Alert.alert(
-      'Sair da conta',
-      'Tem certeza que deseja sair?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Sair',
-          style: 'destructive',
-          onPress: () => logout(),
-        },
-      ],
-    );
+    logout();
   }
 
   return (

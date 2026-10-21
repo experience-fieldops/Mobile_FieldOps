@@ -66,20 +66,32 @@ export default function AppNavigator() {
   // Aguarda restaurar sessão do AsyncStorage antes de montar a navegação
   if (loading) return null;
 
-  // initialRouteName direciona automaticamente para a tela correta.
-  // O React Navigation ignora rotas não definidas no historial de navegação,
-  // portanto Login nunca aparece no back-stack quando o usuário já está logado.
+  // Renderização condicional (padrão de auth flow do React Navigation):
+  // quando o estado de autenticação muda (login/logout), o conjunto de
+  // telas ativo é trocado e o navegador reinicia para a rota inicial certa.
+  // - Deslogado: só existe "Login".
+  // - Logado: só existem "Main" + telas de inspeção (Login não fica no back-stack).
+  // Assim o logout sempre volta para a tela de login, forçando reautenticação,
+  // e o login sempre cai na aba principal. Não é necessário initialRouteName.
   return (
     <NavigationContainer>
-      <Stack.Navigator
-        initialRouteName={user ? 'Main' : 'Login'}
-        screenOptions={{ headerShown: false }}
-      >
-        <Stack.Screen name="Login" component={LoginScreen} />
-        <Stack.Screen name="Main" component={MainTabs} />
-        <Stack.Screen name="InspectionDetail" component={InspectionDetailScreen} />
-        <Stack.Screen name="InspectionForm" component={InspectionFormScreen} />
-        <Stack.Screen name="QRScanner" component={QRScannerScreen} />
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {user ? (
+          <>
+            <Stack.Screen name="Main" component={MainTabs} />
+            <Stack.Screen
+              name="InspectionDetail"
+              component={InspectionDetailScreen}
+            />
+            <Stack.Screen
+              name="InspectionForm"
+              component={InspectionFormScreen}
+            />
+            <Stack.Screen name="QRScanner" component={QRScannerScreen} />
+          </>
+        ) : (
+          <Stack.Screen name="Login" component={LoginScreen} />
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );

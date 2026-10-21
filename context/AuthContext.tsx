@@ -29,8 +29,12 @@ interface AuthContextValue {
   user: User | null;
   /** true enquanto verifica a sessão salva no storage na inicialização. */
   loading: boolean;
-  /** Autentica pelo e-mail + senha (mock offline para testes). */
-  login: (email: string, password: string) => Promise<void>;
+  /**
+   * Autentica pelo e-mail + senha (mock offline para testes).
+   * `persist` (Lembrar-me) define se a sessão é gravada no AsyncStorage e
+   * restaurada na próxima abertura do app.
+   */
+  login: (email: string, password: string, persist: boolean) => Promise<void>;
   /** Remove a sessão local e desloga o usuário. */
   logout: () => Promise<void>;
 }
@@ -62,20 +66,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   /**
    * Login mockado para testes offline.
    * Compara e-mail + senha contra credenciais fixas (MOCK_USER / MOCK_PASSWORD).
+   * `persist` controla se a sessão é gravada no AsyncStorage (Lembrar-me):
+   * quando false, remove qualquer sessão antiga, garantindo que o app abra
+   * sempre no login na próxima vez.
    * Troque de volta por getAllUsers() quando o backend estiver disponível.
    */
-  const login = useCallback(async (email: string, password: string) => {
-    const emailOk =
-      email.trim().toLowerCase() === MOCK_USER.email.toLowerCase();
-    const passOk = password === MOCK_PASSWORD;
+  const login = useCallback(
+    async (email: string, password: string, persist: boolean) => {
+      const emailOk =
+        email.trim().toLowerCase() === MOCK_USER.email.toLowerCase();
+      const passOk = password === MOCK_PASSWORD;
 
-    if (!emailOk || !passOk) {
-      throw new Error('E-mail ou senha incorretos.');
-    }
+      if (!emailOk || !passOk) {
+        throw new Error('E-mail ou senha incorretos.');
+      }
 
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(MOCK_USER));
-    setUser(MOCK_USER);
-  }, []);
+      if (persist) {
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(MOCK_USER));
+      } else {
+        // Limpa qualquer sessão anterior para que o app não autologue
+        // quando o usuário optou por não "Lembrar-me".
+        await AsyncStorage.removeItem(STORAGE_KEY);
+      }
+      setUser(MOCK_USER);
+    },
+    [],
+  );
 
   const logout = useCallback(async () => {
     await AsyncStorage.removeItem(STORAGE_KEY);

@@ -24,7 +24,9 @@ export default function LoginScreen({ navigation }: Props) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [rememberMe, setRememberMe] = useState(true);
+  // Padrão desmarcado: o app abre sempre no login. Marque "Lembrar-me"
+  // para ativar o auto-login na próxima abertura.
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
 
   async function handleLogin() {
@@ -35,8 +37,10 @@ export default function LoginScreen({ navigation }: Props) {
 
     setLoading(true);
     try {
-      await login(email, password);
-      navigation.replace('Main');
+      await login(email, password, rememberMe);
+      // A troca de Login -> Main é controlada pelo estado de autenticação
+      // no AppNavigator (renderização condicional), então não é preciso
+      // navegar manualmente aqui.
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Erro ao realizar login.';
