@@ -8,6 +8,7 @@ import InspectionsScreen from '../screens/InspectionsScreen';
 import InspectionDetailScreen from '../screens/InspectionDetailScreen';
 import InspectionFormScreen from '../screens/InspectionFormScreen';
 import QRScannerScreen from '../screens/QRScannerScreen';
+import ChecklistExecutionScreen from '../screens/ChecklistExecutionScreen';
 import EquipmentScreen from '../screens/EquipmentScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import SyncScreen from '../screens/SyncScreen';
@@ -19,6 +20,7 @@ export type RootStackParamList = {
   InspectionDetail: { inspectionId: string };
   InspectionForm: { inspectionId: string };
   QRScanner: { inspectionId: string };
+  ChecklistExecution: { inspectionId: string };
 };
 
 export type MainTabParamList = {
@@ -88,6 +90,7 @@ export default function AppNavigator() {
               component={InspectionFormScreen}
             />
             <Stack.Screen name="QRScanner" component={QRScannerScreen} />
+            <Stack.Screen name="ChecklistExecution" component={ChecklistExecutionScreen} />
           </>
         ) : (
           <Stack.Screen name="Login" component={LoginScreen} />

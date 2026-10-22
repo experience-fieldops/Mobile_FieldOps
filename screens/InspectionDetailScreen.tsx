@@ -18,8 +18,8 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 const priorityColors: Record<Priority, string> = {
   Alta: '#E53935',
-  Médio: '#FFA000',
-  Baixo: '#1E88E5',
+  Média: '#FFA000',
+  Baixa: '#1E88E5',
 };
 
 function ProgressBar({ progress }: { progress: number }) {

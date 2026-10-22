@@ -46,8 +46,8 @@ const FILTERS: FilterOption[] = [
 
 const priorityColors: Record<Priority, string> = {
   Alta: '#E53935',
-  Médio: '#FFA000',
-  Baixo: '#1E88E5',
+  Média: '#FFA000',
+  Baixa: '#1E88E5',
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -208,7 +208,7 @@ function InspectionModal({
               onPress={onScan}
               activeOpacity={0.7}
             >
-              <AppText style={styles.btnScanText}>Escanear</AppText>
+              <AppText style={styles.btnScanText}>Iniciar</AppText>
             </TouchableOpacity>
           </View>
         </Pressable>
@@ -371,7 +371,7 @@ export default function InspectionsScreen() {
         onScan={() => {
           const id = selectedInspection?.id ?? '';
           setSelectedInspection(null);
-          navigation.navigate('QRScanner', { inspectionId: id });
+          navigation.navigate('ChecklistExecution', { inspectionId: id });
         }}
       />
     </View>
