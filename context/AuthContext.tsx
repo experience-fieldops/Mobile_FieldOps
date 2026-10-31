@@ -1,3 +1,4 @@
+
 import {
   createContext,
   useContext,
@@ -6,111 +7,186 @@ import {
   useCallback,
   ReactNode,
 } from 'react';
+
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 
 import { User } from '../types/user';
-
-// ─── Mock de teste (offline) ────────────────────────────────────────────────
-// Credenciais fixas para testar o fluxo de login sem backend.
-// Remova este bloco e restaure a chamada a getAllUsers() ao voltar para a API.
-const MOCK_USER: User = {
-  id: 1,
-  name: 'Admin Teste',
-  email: 'admin@fieldops.com',
-  role: 'inspetor',
-  organization: 'FieldOps',
-};
-const MOCK_PASSWORD = '123456';
-
-// ─── Tipos ───────────────────────────────────────────────────────────────────
+import { authenticate } from '../services/authService';
 
 interface AuthContextValue {
-  /** Usuário atualmente logado, ou null se não autenticado. */
   user: User | null;
-  /** true enquanto verifica a sessão salva no storage na inicialização. */
+  token: string | null;
   loading: boolean;
-  /**
-   * Autentica pelo e-mail + senha (mock offline para testes).
-   * `persist` (Lembrar-me) define se a sessão é gravada no AsyncStorage e
-   * restaurada na próxima abertura do app.
-   */
-  login: (email: string, password: string, persist: boolean) => Promise<void>;
-  /** Remove a sessão local e desloga o usuário. */
+  login: (
+    email: string,
+    password: string,
+    persist: boolean
+  ) => Promise<void>;
   logout: () => Promise<void>;
 }
 
-// ─── Context ─────────────────────────────────────────────────────────────────
+interface StoredSession {
+  user: User;
+  token: string;
+  expiresAt: number;
+}
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-const STORAGE_KEY = '@fieldops:user';
+const SESSION_KEY = 'fieldops_session';
+const OLD_STORAGE_KEY = '@fieldops:user';
 
-// ─── Provider ────────────────────────────────────────────────────────────────
+const isNative = Platform.OS !== 'web';
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+export function AuthProvider({
+  children,
+}: {
+  children: ReactNode;
+}) {
   const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Restaura sessão persistida ao abrir o app
+  // Restaurar sessão persistida
   useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((raw) => {
-        if (raw) setUser(JSON.parse(raw) as User);
-      })
-      .catch(() => {
-        // storage corrompido: ignora e segue sem sessão
-      })
-      .finally(() => setLoading(false));
+    let mounted = true;
+
+    const restoreSession = async () => {
+      try {
+        // Remover sessão antiga que não possuía JWT
+        await AsyncStorage.removeItem(OLD_STORAGE_KEY);
+
+        if (!isNative) return;
+
+        const raw = await SecureStore.getItemAsync(
+          SESSION_KEY
+        );
+
+        if (!raw) return;
+
+        const session = JSON.parse(raw) as StoredSession;
+
+        const valid =
+          typeof session.token === 'string' &&
+          session.token.length > 0 &&
+          typeof session.expiresAt === 'number' &&
+          Date.now() < session.expiresAt &&
+          session.user != null;
+
+        if (!valid) {
+          await SecureStore.deleteItemAsync(SESSION_KEY);
+          return;
+        }
+
+        if (mounted) {
+          setUser(session.user);
+          setToken(session.token);
+        }
+      } catch (error) {
+        console.error(
+          'Erro ao restaurar sessão:',
+          error
+        );
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    restoreSession();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  /**
-   * Login mockado para testes offline.
-   * Compara e-mail + senha contra credenciais fixas (MOCK_USER / MOCK_PASSWORD).
-   * `persist` controla se a sessão é gravada no AsyncStorage (Lembrar-me):
-   * quando false, remove qualquer sessão antiga, garantindo que o app abra
-   * sempre no login na próxima vez.
-   * Troque de volta por getAllUsers() quando o backend estiver disponível.
-   */
+  // Login pelo backend
   const login = useCallback(
-    async (email: string, password: string, persist: boolean) => {
-      const emailOk =
-        email.trim().toLowerCase() === MOCK_USER.email.toLowerCase();
-      const passOk = password === MOCK_PASSWORD;
+    async (
+      email: string,
+      password: string,
+      persist: boolean
+    ) => {
+      const response = await authenticate(email, password);
 
-      if (!emailOk || !passOk) {
-        throw new Error('E-mail ou senha incorretos.');
+      console.log('JWT recebido:', {
+  possuiToken: Boolean(response.token),
+  tipo: response.type,
+  expiracaoMs: response.expiresIn,
+  usuario: response.user.email,
+  });
+
+      if (
+        !response.token ||
+        !Number.isFinite(response.expiresIn) ||
+        response.expiresIn <= 0
+      ) {
+        throw new Error(
+          'Resposta de autenticação inválida.'
+        );
       }
 
-      if (persist) {
-        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(MOCK_USER));
-      } else {
-        // Limpa qualquer sessão anterior para que o app não autologue
-        // quando o usuário optou por não "Lembrar-me".
-        await AsyncStorage.removeItem(STORAGE_KEY);
+      const authenticatedUser: User = {
+        id: response.user.id,
+        name: response.user.name,
+        email: response.user.email,
+        role: response.user.role as User['role'],
+        organization: 'FieldOps',
+      };
+
+      const session: StoredSession = {
+        user: authenticatedUser,
+        token: response.token,
+        expiresAt: Date.now() + response.expiresIn,
+      };
+
+      if (isNative) {
+        if (persist) {
+          await SecureStore.setItemAsync(
+            SESSION_KEY,
+            JSON.stringify(session)
+          );
+        } else {
+          await SecureStore.deleteItemAsync(SESSION_KEY);
+        }
       }
-      setUser(MOCK_USER);
+
+      setUser(authenticatedUser);
+      setToken(response.token);
     },
-    [],
+    []
   );
 
+  // Logout
   const logout = useCallback(async () => {
-    await AsyncStorage.removeItem(STORAGE_KEY);
     setUser(null);
+    setToken(null);
+
+    if (isNative) {
+      await SecureStore.deleteItemAsync(SESSION_KEY);
+    }
+
+    await AsyncStorage.removeItem(OLD_STORAGE_KEY);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider
+      value={{ user, token, loading, login, logout }}
+    >
       {children}
     </AuthContext.Provider>
   );
 }
 
-// ─── Hook ────────────────────────────────────────────────────────────────────
-
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
+
   if (!ctx) {
-    throw new Error('useAuth deve ser usado dentro de <AuthProvider>');
+    throw new Error(
+      'useAuth deve ser usado dentro de AuthProvider'
+    );
   }
+
   return ctx;
 }
