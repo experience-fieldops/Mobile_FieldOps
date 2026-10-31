@@ -130,6 +130,8 @@ export default function LoginScreen({ navigation }: Props) {
         <TouchableOpacity>
           <AppText style={styles.forgotPassword}>Esqueci minha senha</AppText>
         </TouchableOpacity>
+
+        <AppText style={styles.version}>v1.0</AppText>
       </View>
     </View>
   );
@@ -200,6 +202,14 @@ const styles = StyleSheet.create({
     color: '#24558A',
     fontSize: 12,
     fontFamily: 'Inter_600SemiBold',
+  },
+
+  version: {
+    textAlign: 'center',
+    color: '#AAAAAA',
+    fontSize: 11,
+    fontFamily: 'Inter_400Regular',
+    marginTop: 20,
   },
 
   passwordContainer: {
