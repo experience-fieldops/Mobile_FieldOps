@@ -1,5 +1,4 @@
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
+import { publicRequest } from './api';
 
 export interface BackendUser {
   id: number;
@@ -19,30 +18,19 @@ export interface LoginResponse {
   user: BackendUser;
 }
 
+/**
+ * POST /api/auth/login  (endpoint público)
+ * Autentica o usuário e retorna o JWT + dados básicos.
+ */
 export async function authenticate(
   email: string,
   password: string
 ): Promise<LoginResponse> {
-  if (!API_URL) {
-    throw new Error('URL da API não configurada.');
-  }
-
-  const response = await fetch(`${API_URL}/api/auth/login`, {
+  return publicRequest<LoginResponse>('/api/auth/login', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({
       email: email.trim(),
       password,
     }),
   });
-
-  if (!response.ok) {
-    throw new Error(
-      `Erro na autenticação: HTTP ${response.status}`
-    );
-  }
-
-  return (await response.json()) as LoginResponse;
 }
