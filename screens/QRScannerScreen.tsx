@@ -71,10 +71,15 @@ export default function QRScannerScreen() {
       if (scanned) return;
       setScanned(true);
 
-      // O QR code do equipamento deve conter o inspectionId.
+      // O QR code do equipamento deve conter o inspectionId (numérico).
       // Se o dado lido corresponde a uma inspeção existente, abre o formulário.
       // Caso contrário, usa o inspectionId passado como parâmetro (fallback dev).
-      const targetId = MOCK_CHECKLIST[data] ? data : inspectionId;
+      // TODO(M6): resolver o QR via GET /equipments/qrcode/{qrCode} em vez do mock.
+      const scannedId = Number(data);
+      const targetId =
+        Number.isFinite(scannedId) && MOCK_CHECKLIST[scannedId]
+          ? scannedId
+          : inspectionId;
 
       navigation.replace('InspectionForm', { inspectionId: targetId });
     },
@@ -184,11 +189,14 @@ const styles = StyleSheet.create({
   headerSpacer: { width: 30 },
 
   // Câmera — ocupa todo o espaço restante
-  camera: { ...StyleSheet.absoluteFillObject, top: 62 },
+  camera: { position: 'absolute', left: 0, right: 0, bottom: 0, top: 62 },
 
   // Overlay escurecido ao redor da janela de scan
   overlay: {
-    ...StyleSheet.absoluteFillObject,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     top: 62,
     flexDirection: 'column',
   },

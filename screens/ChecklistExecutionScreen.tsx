@@ -32,6 +32,7 @@ import AppText from '../components/AppText';
 import {
   MOCK_CHECKLIST,
   ChecklistItem,
+  ConformityItem,
   ChecklistAnswer,
   ChecklistEvidence,
 } from '../data/inspections';
@@ -90,7 +91,7 @@ const CONFORMITY_COLORS: Record<NonNullable<ChecklistAnswer>, { border: string; 
 // ── CONFORMITY ──────────────────────────────────────────────
 
 interface ConformityProps {
-  item: ChecklistItem;
+  item: ConformityItem;
   onAnswer: (a: ChecklistAnswer) => void;
 }
 
@@ -426,7 +427,9 @@ export default function ChecklistExecutionScreen() {
 
   function updateItem(patch: Partial<ChecklistItem>) {
     setItems((prev) =>
-      prev.map((it, idx) => (idx === currentIndex ? { ...it, ...patch } : it)),
+      prev.map((it, idx) =>
+        idx === currentIndex ? ({ ...it, ...patch } as ChecklistItem) : it,
+      ),
     );
   }
 

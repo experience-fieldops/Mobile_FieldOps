@@ -369,9 +369,11 @@ export default function InspectionsScreen() {
         inspection={selectedInspection}
         onClose={() => setSelectedInspection(null)}
         onScan={() => {
-          const id = selectedInspection?.id ?? '';
+          const id = selectedInspection?.id;
           setSelectedInspection(null);
-          navigation.navigate('ChecklistExecution', { inspectionId: id });
+          if (id != null) {
+            navigation.navigate('ChecklistExecution', { inspectionId: id });
+          }
         }}
       />
     </View>
