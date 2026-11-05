@@ -17,6 +17,40 @@ export type BackendInspectionStatus =
   | 'REJECTED'
   | 'CANCELLED';
 
+// Tipo de resposta esperado por um item do checklist (snapshot do template)
+export type BackendResponseType =
+  | 'TEXT_SHORT'
+  | 'TEXT_LONG'
+  | 'NUMBER'
+  | 'BOOLEAN'
+  | 'CONFORMITY'
+  | 'SINGLE_CHOICE'
+  | 'DATE';
+
+/**
+ * Item congelado (snapshot) do template no momento da criação da inspeção.
+ *
+ * Origem: Backend - InspectionItemSnapshotResponse.java
+ * Retornado dentro de InspectionResponse.itemSnapshots no
+ * GET /api/v1/inspections/{id}.
+ */
+export interface InspectionItemSnapshotResponse {
+  id: number;
+  originalItemId: number;
+  code: string;
+  title: string;
+  description: string | null;
+  responseType: BackendResponseType;
+  required: boolean;
+  observationRequiredOnFailure: boolean;
+  evidenceRequiredOnFailure: boolean;
+  /** JSON (string) com as opções, quando responseType = SINGLE_CHOICE. */
+  optionsJson: string | null;
+  sectionTitle: string;
+  sectionDisplayOrder: number;
+  itemDisplayOrder: number;
+}
+
 // Estrutura de uma inspeção recebida da API
 export interface BackendInspection {
   id: number;
@@ -67,13 +101,10 @@ export interface BackendInspection {
   updatedAt: string;
 
   /**
-   * Itens do checklist.
+   * Itens do checklist (snapshots do template).
    *
-   * O backend informa que são retornados
-   * no GET /api/v1/inspections/{id}.
-   *
-   * Vamos tipar esses itens quando analisarmos
-   * InspectionItemSnapshotResponse.java.
+   * Retornados pelo GET /api/v1/inspections/{id}
+   * (ausentes na listagem paginada).
    */
-  itemSnapshots?: unknown[] | null;
+  itemSnapshots?: InspectionItemSnapshotResponse[] | null;
 }

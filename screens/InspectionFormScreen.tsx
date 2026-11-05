@@ -91,7 +91,9 @@ export default function InspectionFormScreen() {
     (answer: ChecklistAnswer) => {
       setItems((prev) =>
         prev.map((it, idx) =>
-          idx === currentIndex ? { ...it, answer } : it,
+          idx === currentIndex
+            ? ({ ...it, answer } as ChecklistItem)
+            : it,
         ),
       );
     },
@@ -186,7 +188,9 @@ export default function InspectionFormScreen() {
         {/* Opções de resposta */}
         <View style={styles.optionsGroup}>
           {OPTIONS.map((opt) => {
-            const selected = item.answer === opt.value;
+            // Esta tela trata todos os itens como conformidade (legado).
+            const selected =
+              (item.type === 'CONFORMITY' ? item.answer : null) === opt.value;
             return (
               <TouchableOpacity
                 key={opt.value}

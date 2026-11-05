@@ -17,10 +17,10 @@ import { useAuth } from '../context/AuthContext';
 export type RootStackParamList = {
   Login: undefined;
   Main: undefined;
-  InspectionDetail: { inspectionId: string };
-  InspectionForm: { inspectionId: string };
-  QRScanner: { inspectionId: string };
-  ChecklistExecution: { inspectionId: string };
+  InspectionDetail: { inspectionId: number };
+  InspectionForm: { inspectionId: number };
+  QRScanner: { inspectionId: number };
+  ChecklistExecution: { inspectionId: number };
 };
 
 export type MainTabParamList = {
