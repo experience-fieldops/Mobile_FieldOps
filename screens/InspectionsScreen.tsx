@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useCallback } from 'react';
 import {
   View,
   ScrollView,
@@ -7,6 +7,8 @@ import {
   StatusBar,
   Modal,
   Pressable,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import {
   WifiOff,
@@ -15,20 +17,25 @@ import {
   RefreshCw,
   User,
   FileX,
+  AlertCircle,
 } from 'lucide-react-native';
-import { useNavigation } from '@react-navigation/native';
+import {
+  useNavigation,
+  useFocusEffect,
+  CompositeNavigationProp,
+} from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
-import { CompositeNavigationProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import AppText from '../components/AppText';
+import { Inspection, InspectionStatus, Priority } from '../data/inspections';
+import { mapInspections } from '../data/mappers';
+import { getAssignedInspections } from '../services/inspectionService';
+import { useAuth } from '../context/AuthContext';
 import {
-  MOCK_INSPECTIONS,
-  Inspection,
-  InspectionStatus,
-  Priority,
-} from '../data/inspections';
-import { MainTabParamList, RootStackParamList } from '../navigation/AppNavigator';
+  MainTabParamList,
+  RootStackParamList,
+} from '../navigation/AppNavigator';
 
 type InspectionsNavProp = CompositeNavigationProp<
   BottomTabNavigationProp<MainTabParamList, 'Inspeções'>,
@@ -223,26 +230,68 @@ function InspectionModal({
 
 export default function InspectionsScreen() {
   const navigation = useNavigation<InspectionsNavProp>();
+  const { user, token } = useAuth();
+
   const [activeFilter, setActiveFilter] = useState<FilterOption>('Todas');
 
   // Guarda a inspeção selecionada; null = modal fechado
   const [selectedInspection, setSelectedInspection] =
     useState<Inspection | null>(null);
 
+  // Estado de dados reais do backend
+  const [inspections, setInspections] = useState<Inspection[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Busca as inspeções atribuídas ao técnico logado.
+  const loadInspections = useCallback(
+    async (mode: 'initial' | 'refresh' = 'initial') => {
+      if (!token || user == null) {
+        setError('Sessão inválida. Faça login novamente.');
+        setLoading(false);
+        return;
+      }
+
+      if (mode === 'refresh') setRefreshing(true);
+      else setLoading(true);
+      setError(null);
+
+      try {
+        const page = await getAssignedInspections(token, user.id);
+        setInspections(mapInspections(page.content));
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Erro ao carregar inspeções.';
+        setError(message);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [token, user],
+  );
+
+  // Recarrega sempre que a tela ganha foco (ex.: ao voltar da execução).
+  useFocusEffect(
+    useCallback(() => {
+      loadInspections('initial');
+    }, [loadInspections]),
+  );
+
   const filteredInspections = useMemo(() => {
-    if (activeFilter === 'Todas') return MOCK_INSPECTIONS;
-    return MOCK_INSPECTIONS.filter((i) => i.status === activeFilter);
-  }, [activeFilter]);
+    if (activeFilter === 'Todas') return inspections;
+    return inspections.filter((i) => i.status === activeFilter);
+  }, [activeFilter, inspections]);
 
   const counts = useMemo(
     () => ({
-      assigned: MOCK_INSPECTIONS.length,
-      inProgress: MOCK_INSPECTIONS.filter((i) => i.status === 'Em Andamento')
-        .length,
-      overdue: MOCK_INSPECTIONS.filter((i) => i.status === 'Atrasada').length,
-      returned: MOCK_INSPECTIONS.filter((i) => i.status === 'Devolvida').length,
+      assigned: inspections.length,
+      inProgress: inspections.filter((i) => i.status === 'Em Andamento').length,
+      overdue: inspections.filter((i) => i.status === 'Atrasada').length,
+      returned: inspections.filter((i) => i.status === 'Devolvida').length,
     }),
-    [],
+    [inspections],
   );
 
   return (
@@ -321,14 +370,46 @@ export default function InspectionsScreen() {
         ))}
       </ScrollView>
 
-      {/* ── Lista ou estado vazio ───────────────────────── */}
-      {filteredInspections.length === 0 ? (
-        <EmptyState filter={activeFilter} />
+      {/* ── Carregando / erro / lista / vazio ───────────── */}
+      {loading ? (
+        <View style={styles.centerState}>
+          <ActivityIndicator size="large" color="#132539" />
+        </View>
+      ) : error ? (
+        <View style={styles.centerState}>
+          <AlertCircle size={48} color="#E53935" />
+          <AppText style={styles.errorText}>{error}</AppText>
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={() => loadInspections('initial')}
+            activeOpacity={0.7}
+          >
+            <AppText style={styles.retryBtnText}>Tentar novamente</AppText>
+          </TouchableOpacity>
+        </View>
+      ) : filteredInspections.length === 0 ? (
+        <ScrollView
+          contentContainerStyle={styles.emptyScroll}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => loadInspections('refresh')}
+            />
+          }
+        >
+          <EmptyState filter={activeFilter} />
+        </ScrollView>
       ) : (
         <ScrollView
           style={styles.list}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => loadInspections('refresh')}
+            />
+          }
         >
           {filteredInspections.map((item) => (
             <InspectionCard
@@ -558,6 +639,35 @@ const styles = StyleSheet.create({
     color: '#BDBDBD',
     fontFamily: 'Inter_400Regular',
     textAlign: 'center',
+  },
+  emptyScroll: { flexGrow: 1 },
+
+  // Estados de carregamento / erro
+  centerState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 32,
+    paddingBottom: 60,
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#E53935',
+    fontFamily: 'Inter_400Regular',
+    textAlign: 'center',
+  },
+  retryBtn: {
+    marginTop: 8,
+    backgroundColor: '#132539',
+    borderRadius: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+  },
+  retryBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Inter_700Bold',
   },
 
   // Tab Bar
