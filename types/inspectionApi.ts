@@ -194,3 +194,52 @@ export interface ChecklistResponseDTO {
   createdAt: string;
   updatedAt: string;
 }
+
+// ─────────────────────────────────────────────────────────────
+// Evidências e não conformidades
+// ─────────────────────────────────────────────────────────────
+
+/** Origem: Backend - EvidenceResponse.java */
+export interface EvidenceResponse {
+  id: number;
+  inspectionId: number;
+  inspectionResponseId: number | null;
+  nonConformityId: number | null;
+  fileKey: string;
+  fileUrl: string;
+  originalFilename: string;
+  contentType: string;
+  fileSizeBytes: number;
+  createdAt: string;
+}
+
+export type NonConformitySeverity = 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+
+export type NonConformityStatus =
+  'OPEN' | 'RESOLVED' | 'DISMISSED' | 'PENDING_EVIDENCE';
+
+/** POST /api/v1/inspections/{id}/non-conformities */
+export interface NonConformityRequest {
+  title: string;
+  severity: NonConformitySeverity;
+  description?: string;
+  snapshotItemId?: number;
+  evidenceAttached?: boolean;
+}
+
+/** Origem: Backend - NonConformityResponse.java */
+export interface NonConformityResponse {
+  id: number;
+  inspectionId: number;
+  snapshotItemId: number | null;
+  snapshotItemTitle: string | null;
+  title: string;
+  description: string | null;
+  severity: NonConformitySeverity;
+  status: NonConformityStatus;
+  dismissalReason: string | null;
+  evidenceAttached: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}

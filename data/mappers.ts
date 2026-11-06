@@ -12,9 +12,11 @@ import {
   BackendResponseType,
   InspectionItemSnapshotResponse,
   ChecklistResponseRequest,
+  NonConformitySeverity,
 } from '../types/inspectionApi';
 import {
   Inspection,
+  Severity,
   InspectionStatus,
   Priority,
   ChecklistItem,
@@ -300,4 +302,23 @@ export function toChecklistResponseRequest(
     gpsLongitude: options?.gpsLongitude,
     respondedAt: options?.respondedAt,
   };
+}
+
+// ─────────────────────────────────────────────────────────────
+// Severidade de não conformidade: rótulo PT (UI) → enum backend
+// ─────────────────────────────────────────────────────────────
+
+export function mapSeverity(sev: Severity): NonConformitySeverity {
+  switch (sev) {
+    case 'Baixa':
+      return 'LOW';
+    case 'Média':
+      return 'MEDIUM';
+    case 'Alta':
+      return 'HIGH';
+    case 'Crítica':
+      return 'CRITICAL';
+    default:
+      return 'MEDIUM';
+  }
 }
