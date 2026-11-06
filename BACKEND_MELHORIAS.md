@@ -1,0 +1,124 @@
+# Melhorias necessárias no Backend (FieldOps API)
+
+> Lista de ajustes no backend identificados durante a integração do app mobile.
+> Cada item traz o **problema**, o **impacto no mobile**, a **sugestão** e o **workaround atual** (o que o app faz hoje para não travar).
+>
+> Base: contrato OpenAPI `http://localhost:8080/v3/api-docs`. Referências `D-xx` apontam para as divergências catalogadas em [`INTEGRACAO.md`](./INTEGRACAO.md).
+
+| # | Severidade | Tema |
+|---|---|---|
+| B-01 | 🔴 Alta | Enum de conformidade ausente |
+| B-02 | 🟠 Média | Prioridade da inspeção inexistente |
+| B-03 | 🟠 Média | Progresso/percentual já existe — confirmar semântica |
+| B-04 | 🟡 Baixa | Código amigável da inspeção |
+| B-05 | 🟡 Baixa | Tempo estimado da inspeção |
+| B-06 | 🟡 Baixa | Organização do usuário |
+| B-07 | 🟡 Baixa | Métricas do técnico |
+| B-08 | 🟠 Média | `requestingUserId`/`technicianId` via query |
+| B-09 | 🟡 Baixa | `BOOLEAN`/`DATE` — formato do `value` |
+
+---
+
+## B-01 — Enum de conformidade (D-07) 🔴
+
+**Problema.** O item de checklist do tipo `CONFORMITY` grava a resposta em `ChecklistResponseRequest.value`, que é **string livre**. Não há enum nem conjunto de valores aceitos documentado.
+
+**Impacto no mobile.** A UI tem 4 respostas fixas: `Conforme`, `Atenção`, `Inconforme`, `Não verificado`. Sem um contrato, não há garantia de que o backend interprete esses valores (relatórios, regras de não conformidade, etc.).
+
+**Sugestão.** Criar um enum no backend, por exemplo:
+```
+ConformityValue = CONFORMING | ATTENTION | NON_CONFORMING | NOT_VERIFIED
+```
+e validar `value` contra ele quando `responseType = CONFORMITY`. Expor o enum no OpenAPI.
+
+**Workaround atual no app.** Enviamos o **rótulo PT literal** (`"Conforme"`, `"Inconforme"`…) em `value`. Está isolado em `data/mappers.ts → conformityToValue()` com `TODO(D-07)`; trocar para o enum oficial é mudança de uma função só.
+
+---
+
+## B-02 — Prioridade da inspeção (D-06) 🟠
+
+**Problema.** `InspectionResponse` não tem campo de prioridade.
+
+**Impacto.** A lista e o detalhe exibem um badge de prioridade (Alta/Média/Baixa). Hoje é sempre "Média".
+
+**Sugestão.** Adicionar `priority` (enum `HIGH | MEDIUM | LOW`) ao `InspectionResponse`, ou esclarecer que prioridade não faz parte do domínio (e aí removemos o badge).
+
+**Workaround atual.** `data/mappers.ts → derivePriority()` retorna `'Média'` fixo.
+
+---
+
+## B-03 — Progresso / percentual 🟠
+
+**Situação.** O endpoint `GET /api/v1/inspections/{inspectionId}/responses/progress` **já existe** e retorna `InspectionProgressResponse` com `progressPercentage`, `totalItems`, `answeredItems`, etc. — ótimo.
+
+**A confirmar.** Semântica de `progressPercentage`: é 0–100 (usamos `Math.round`)? Conta `notApplicableItems` como respondidos? O app assume 0–100 e arredonda.
+
+**Sugestão.** Documentar a fórmula no OpenAPI (description do campo).
+
+---
+
+## B-04 — Código amigável da inspeção 🟡
+
+**Problema.** Não há um código legível (ex.: `INSP-2026-001`); só o `id` numérico.
+
+**Impacto.** A UI mostra um "código" em vários lugares.
+
+**Workaround atual.** Derivamos `INSP-{id}` no mapper.
+
+**Sugestão.** Se houver um código de negócio, expô-lo no `InspectionResponse`.
+
+---
+
+## B-05 — Tempo estimado 🟡
+
+**Problema.** `InspectionResponse` não traz tempo estimado de execução.
+
+**Impacto.** O modal de detalhe tem o campo "Tempo estimado"; hoje exibe "—".
+
+**Sugestão.** Adicionar `estimatedTime`/`estimatedMinutes` se fizer parte do domínio, ou confirmar que o campo sai da UI.
+
+---
+
+## B-06 — Organização do usuário 🟡
+
+**Problema.** `UserResponse` (e o login) não retornam a organização.
+
+**Impacto.** A tela de perfil mostra "Organização"; o app usa `'FieldOps'` hardcoded.
+
+**Sugestão.** Incluir `organization`/`tenant` no `UserResponse`, ou confirmar que não se aplica.
+
+---
+
+## B-07 — Métricas do técnico 🟡
+
+**Problema.** Não há endpoint de métricas do técnico (inspeções concluídas, % de aprovação, devolvidas).
+
+**Impacto.** A tela de perfil exibe números fixos (mock).
+
+**Sugestão.** Criar algo como `GET /api/v1/technicians/{id}/metrics`, ou deixaremos a UI derivar client-side via listagens (menos eficiente).
+
+---
+
+## B-08 — `requestingUserId` / `technicianId` na query 🟠
+
+**Problema.** Vários endpoints exigem o id do usuário na **query string** (`?requestingUserId=`, `?technicianId=`), mesmo já havendo um JWT autenticado que identifica o usuário.
+
+**Endpoints afetados.** `POST /inspections/{id}/executions`, `POST /executions/{id}/responses`, `PATCH /executions/{id}/complete|pause`, `GET /inspections/assigned`, `POST /api/v1/sync`, etc.
+
+**Impacto.** Redundância e risco: o cliente poderia enviar um id diferente do dono do token. O app usa `user.id` do token, mas o backend não deveria confiar nesse parâmetro.
+
+**Sugestão.** Derivar o usuário do próprio JWT no backend e tornar esses parâmetros desnecessários (ou ignorá-los/validar que batem com o token).
+
+---
+
+## B-09 — Formato do `value` para BOOLEAN e DATE 🟡
+
+**Problema.** `value` é string livre também para itens `BOOLEAN` e `DATE`; o formato esperado não está documentado.
+
+**Impacto.** O app envia `BOOLEAN` como `"true"`/`"false"` e `DATE` como o texto digitado (máscara `dd/mm/aaaa`). Pode não bater com o parser do backend.
+
+**Sugestão.** Documentar o formato esperado por `responseType` (ex.: BOOLEAN = `"true"|"false"`, DATE = ISO `yyyy-mm-dd`). Se for ISO, o app precisa converter a máscara antes de enviar.
+
+---
+
+*Documento vivo — atualizar conforme o backend evolui ou novas divergências surgirem na integração.*
