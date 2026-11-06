@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   ScrollView,
@@ -9,6 +9,8 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
 import {
   ArrowLeft,
@@ -30,12 +32,23 @@ import * as ImagePicker from 'expo-image-picker';
 
 import AppText from '../components/AppText';
 import {
-  MOCK_CHECKLIST,
   ChecklistItem,
   ConformityItem,
   ChecklistAnswer,
   ChecklistEvidence,
 } from '../data/inspections';
+import {
+  mapSnapshotsToChecklist,
+  toChecklistResponseRequest,
+} from '../data/mappers';
+import { getInspectionById } from '../services/inspectionService';
+import {
+  startExecution,
+  saveResponse,
+  completeExecution,
+} from '../services/executionService';
+import { getCurrentCoordinates } from '../services/location';
+import { useAuth } from '../context/AuthContext';
 import { RootStackParamList } from '../navigation/AppNavigator';
 
 // ─────────────────────────────────────────────────────────────
@@ -77,11 +90,14 @@ function isMissingRequired(item: ChecklistItem): boolean {
 }
 
 // Cores de destaque por resposta de conformidade
-const CONFORMITY_COLORS: Record<NonNullable<ChecklistAnswer>, { border: string; bg: string; label: string }> = {
-  Conforme:        { border: '#45A835', bg: '#F0FAF0', label: '#2E7D32' },
-  Atenção:         { border: '#FFA000', bg: '#FFFDE7', label: '#E65100' },
-  Inconforme:      { border: '#E53935', bg: '#FFEBEE', label: '#B71C1C' },
-  'Não verificado':{ border: '#9E9E9E', bg: '#F5F5F5', label: '#555' },
+const CONFORMITY_COLORS: Record<
+  NonNullable<ChecklistAnswer>,
+  { border: string; bg: string; label: string }
+> = {
+  Conforme: { border: '#45A835', bg: '#F0FAF0', label: '#2E7D32' },
+  Atenção: { border: '#FFA000', bg: '#FFFDE7', label: '#E65100' },
+  Inconforme: { border: '#E53935', bg: '#FFEBEE', label: '#B71C1C' },
+  'Não verificado': { border: '#9E9E9E', bg: '#F5F5F5', label: '#555' },
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -96,11 +112,31 @@ interface ConformityProps {
 }
 
 function ConformityInput({ item, onAnswer }: ConformityProps) {
-  const OPTIONS: { value: ChecklistAnswer; label: string; icon: React.ReactNode }[] = [
-    { value: 'Conforme',        label: 'Conforme',        icon: <Smile   size={26} color="#132539" strokeWidth={1.5} /> },
-    { value: 'Atenção',         label: 'Atenção',         icon: <Meh     size={26} color="#132539" strokeWidth={1.5} /> },
-    { value: 'Inconforme',      label: 'Inconforme',      icon: <Frown   size={26} color="#132539" strokeWidth={1.5} /> },
-    { value: 'Não verificado',  label: 'Não verificado',  icon: <XCircle size={26} color="#132539" strokeWidth={1.5} /> },
+  const OPTIONS: {
+    value: ChecklistAnswer;
+    label: string;
+    icon: React.ReactNode;
+  }[] = [
+    {
+      value: 'Conforme',
+      label: 'Conforme',
+      icon: <Smile size={26} color="#132539" strokeWidth={1.5} />,
+    },
+    {
+      value: 'Atenção',
+      label: 'Atenção',
+      icon: <Meh size={26} color="#132539" strokeWidth={1.5} />,
+    },
+    {
+      value: 'Inconforme',
+      label: 'Inconforme',
+      icon: <Frown size={26} color="#132539" strokeWidth={1.5} />,
+    },
+    {
+      value: 'Não verificado',
+      label: 'Não verificado',
+      icon: <XCircle size={26} color="#132539" strokeWidth={1.5} />,
+    },
   ];
 
   return (
@@ -126,7 +162,9 @@ function ConformityInput({ item, onAnswer }: ConformityProps) {
             <AppText
               style={[
                 inputStyles.optionLabel,
-                sel && colors ? { color: colors.label, fontFamily: 'Inter_700Bold' } : null,
+                sel && colors
+                  ? { color: colors.label, fontFamily: 'Inter_700Bold' }
+                  : null,
               ]}
             >
               {opt.label}
@@ -157,16 +195,21 @@ function BooleanInput({ value, onChange }: BooleanProps) {
             key={String(opt)}
             style={[
               inputStyles.boolBtn,
-              sel && { borderColor: selColor, backgroundColor: sel ? (opt ? '#F0FAF0' : '#FFEBEE') : '#FFF' },
+              sel && {
+                borderColor: selColor,
+                backgroundColor: sel ? (opt ? '#F0FAF0' : '#FFEBEE') : '#FFF',
+              },
             ]}
             activeOpacity={0.75}
             onPress={() => onChange(opt)}
             accessibilityRole="radio"
             accessibilityState={{ selected: sel }}
           >
-            {sel
-              ? <CheckCircle2 size={22} color={selColor} />
-              : <Circle size={22} color="#BDBDBD" />}
+            {sel ? (
+              <CheckCircle2 size={22} color={selColor} />
+            ) : (
+              <Circle size={22} color="#BDBDBD" />
+            )}
             <AppText
               style={[
                 inputStyles.boolLabel,
@@ -280,11 +323,16 @@ function ChoiceInput({ choices, value, onChange }: ChoiceProps) {
             accessibilityRole="radio"
             accessibilityState={{ selected: sel }}
           >
-            {sel
-              ? <CheckCircle2 size={20} color="#45A835" />
-              : <Circle size={20} color="#BDBDBD" />}
+            {sel ? (
+              <CheckCircle2 size={20} color="#45A835" />
+            ) : (
+              <Circle size={20} color="#BDBDBD" />
+            )}
             <AppText
-              style={[inputStyles.choiceLabel, sel && inputStyles.choiceLabelSelected]}
+              style={[
+                inputStyles.choiceLabel,
+                sel && inputStyles.choiceLabelSelected,
+              ]}
             >
               {opt}
             </AppText>
@@ -304,7 +352,12 @@ interface PhotoProps {
   onRemove: (uri: string) => void;
 }
 
-function PhotoInput({ evidences, requiresEvidence, onAdd, onRemove }: PhotoProps) {
+function PhotoInput({
+  evidences,
+  requiresEvidence,
+  onAdd,
+  onRemove,
+}: PhotoProps) {
   async function openCamera() {
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -352,25 +405,41 @@ function PhotoInput({ evidences, requiresEvidence, onAdd, onRemove }: PhotoProps
       {/* Botões câmera / galeria */}
       <View style={inputStyles.evidenceBtns}>
         <TouchableOpacity
-          style={[inputStyles.evidenceBtn, missing && inputStyles.evidenceBtnRequired]}
+          style={[
+            inputStyles.evidenceBtn,
+            missing && inputStyles.evidenceBtnRequired,
+          ]}
           activeOpacity={0.75}
           onPress={openCamera}
           accessibilityLabel="Abrir câmera"
         >
           <Camera size={22} color={missing ? '#E53935' : '#132539'} />
-          <AppText style={[inputStyles.evidenceBtnLabel, missing && { color: '#E53935' }]}>
+          <AppText
+            style={[
+              inputStyles.evidenceBtnLabel,
+              missing && { color: '#E53935' },
+            ]}
+          >
             Câmera
           </AppText>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[inputStyles.evidenceBtn, missing && inputStyles.evidenceBtnRequired]}
+          style={[
+            inputStyles.evidenceBtn,
+            missing && inputStyles.evidenceBtnRequired,
+          ]}
           activeOpacity={0.75}
           onPress={openGallery}
           accessibilityLabel="Abrir galeria"
         >
           <ImageIcon size={22} color={missing ? '#E53935' : '#132539'} />
-          <AppText style={[inputStyles.evidenceBtnLabel, missing && { color: '#E53935' }]}>
+          <AppText
+            style={[
+              inputStyles.evidenceBtnLabel,
+              missing && { color: '#E53935' },
+            ]}
+          >
             Galeria
           </AppText>
         </TouchableOpacity>
@@ -410,15 +479,64 @@ export default function ChecklistExecutionScreen() {
   const navigation = useNavigation<ExecNavProp>();
   const route = useRoute<ExecRouteProp>();
   const { inspectionId } = route.params;
+  const { user, token } = useAuth();
 
-  const [items, setItems] = useState<ChecklistItem[]>(
-    () => MOCK_CHECKLIST[inspectionId] ?? [],
-  );
+  const [items, setItems] = useState<ChecklistItem[]>([]);
+  const [executionId, setExecutionId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
   const [currentIndex, setCurrentIndex] = useState(0);
   // Exibe aviso de obrigatório se o usuário tentar avançar sem responder
   const [showRequired, setShowRequired] = useState(false);
 
   const scrollRef = useRef<ScrollView>(null);
+
+  // Carrega os itens do checklist (itemSnapshots) e inicia a execução
+  // com a coordenada GPS atual (obrigatória no backend).
+  useEffect(() => {
+    let active = true;
+
+    async function init() {
+      if (!token || user == null) {
+        setError('Sessão inválida. Faça login novamente.');
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
+      setError(null);
+
+      try {
+        const dto = await getInspectionById(token, inspectionId);
+        const checklist = mapSnapshotsToChecklist(dto.itemSnapshots ?? []);
+
+        const coords = await getCurrentCoordinates();
+        const exec = await startExecution(token, inspectionId, user.id, {
+          gpsLatitude: coords.latitude,
+          gpsLongitude: coords.longitude,
+          startedAt: new Date().toISOString(),
+        });
+
+        if (!active) return;
+        setItems(checklist);
+        setExecutionId(exec.id);
+      } catch (err) {
+        if (!active) return;
+        const message =
+          err instanceof Error ? err.message : 'Erro ao iniciar a inspeção.';
+        setError(message);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    init();
+    return () => {
+      active = false;
+    };
+  }, [token, user, inspectionId]);
 
   const total = items.length;
   const item = items[currentIndex];
@@ -433,33 +551,60 @@ export default function ChecklistExecutionScreen() {
     );
   }
 
-  const handleAnswer    = useCallback((answer: ChecklistAnswer) => updateItem({ answer }), [currentIndex]);
-  const handleText      = useCallback((textAnswer: string) => updateItem({ textAnswer }), [currentIndex]);
-  const handleNumber    = useCallback((numberAnswer: string) => updateItem({ numberAnswer }), [currentIndex]);
-  const handleBoolean   = useCallback((booleanAnswer: boolean) => updateItem({ booleanAnswer }), [currentIndex]);
-  const handleChoice    = useCallback((choiceAnswer: string) => updateItem({ choiceAnswer }), [currentIndex]);
-  const handleDate      = useCallback((dateAnswer: string) => updateItem({ dateAnswer }), [currentIndex]);
-  const handleObs       = useCallback((observation: string) => updateItem({ observation }), [currentIndex]);
+  const handleAnswer = useCallback(
+    (answer: ChecklistAnswer) => updateItem({ answer }),
+    [currentIndex],
+  );
+  const handleText = useCallback(
+    (textAnswer: string) => updateItem({ textAnswer }),
+    [currentIndex],
+  );
+  const handleNumber = useCallback(
+    (numberAnswer: string) => updateItem({ numberAnswer }),
+    [currentIndex],
+  );
+  const handleBoolean = useCallback(
+    (booleanAnswer: boolean) => updateItem({ booleanAnswer }),
+    [currentIndex],
+  );
+  const handleChoice = useCallback(
+    (choiceAnswer: string) => updateItem({ choiceAnswer }),
+    [currentIndex],
+  );
+  const handleDate = useCallback(
+    (dateAnswer: string) => updateItem({ dateAnswer }),
+    [currentIndex],
+  );
+  const handleObs = useCallback(
+    (observation: string) => updateItem({ observation }),
+    [currentIndex],
+  );
 
-  const handleAddEvidence = useCallback((ev: ChecklistEvidence) => {
-    setItems((prev) =>
-      prev.map((it, idx) =>
-        idx === currentIndex
-          ? { ...it, evidences: [...it.evidences, ev] }
-          : it,
-      ),
-    );
-  }, [currentIndex]);
+  const handleAddEvidence = useCallback(
+    (ev: ChecklistEvidence) => {
+      setItems((prev) =>
+        prev.map((it, idx) =>
+          idx === currentIndex
+            ? { ...it, evidences: [...it.evidences, ev] }
+            : it,
+        ),
+      );
+    },
+    [currentIndex],
+  );
 
-  const handleRemoveEvidence = useCallback((uri: string) => {
-    setItems((prev) =>
-      prev.map((it, idx) =>
-        idx === currentIndex
-          ? { ...it, evidences: it.evidences.filter((e) => e.uri !== uri) }
-          : it,
-      ),
-    );
-  }, [currentIndex]);
+  const handleRemoveEvidence = useCallback(
+    (uri: string) => {
+      setItems((prev) =>
+        prev.map((it, idx) =>
+          idx === currentIndex
+            ? { ...it, evidences: it.evidences.filter((e) => e.uri !== uri) }
+            : it,
+        ),
+      );
+    },
+    [currentIndex],
+  );
 
   // ── Navegação ─────────────────────────────────────────────
 
@@ -470,6 +615,45 @@ export default function ChecklistExecutionScreen() {
       scrollRef.current?.scrollTo({ y: 0, animated: false });
     } else {
       navigation.goBack();
+    }
+  }
+
+  // Envia todas as respostas e finaliza a execução no backend.
+  async function submitChecklist() {
+    if (!token || user == null || executionId == null) {
+      Alert.alert('Erro', 'Execução não inicializada.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const respondedAt = new Date().toISOString();
+
+      // Grava cada item respondido sequencialmente.
+      for (const it of items) {
+        if (it.id == null) continue;
+        await saveResponse(
+          token,
+          executionId,
+          user.id,
+          toChecklistResponseRequest(it, { respondedAt }),
+        );
+      }
+
+      const coords = await getCurrentCoordinates().catch(() => null);
+      await completeExecution(token, executionId, user.id, {
+        endGpsLatitude: coords?.latitude,
+        endGpsLongitude: coords?.longitude,
+        completedAt: new Date().toISOString(),
+      });
+
+      navigation.goBack();
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Erro ao enviar a inspeção.';
+      Alert.alert('Falha ao finalizar', message);
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -485,12 +669,33 @@ export default function ChecklistExecutionScreen() {
       setCurrentIndex((i) => i + 1);
       scrollRef.current?.scrollTo({ y: 0, animated: false });
     } else {
-      // TODO: submeter checklist ao backend
-      navigation.goBack();
+      submitChecklist();
     }
   }
 
-  // ── Guard ─────────────────────────────────────────────────
+  // ── Guards ────────────────────────────────────────────────
+
+  // Carregando detalhe + iniciando execução
+  if (loading) {
+    return (
+      <View style={styles.notFound}>
+        <ActivityIndicator size="large" color="#132539" />
+        <AppText style={styles.notFoundText}>Iniciando inspeção…</AppText>
+      </View>
+    );
+  }
+
+  // Erro ao carregar/iniciar
+  if (error) {
+    return (
+      <View style={styles.notFound}>
+        <AppText style={styles.notFoundText}>{error}</AppText>
+        <TouchableOpacity onPress={() => navigation.goBack()}>
+          <AppText style={styles.backLink}>Voltar</AppText>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   if (!item) {
     return (
@@ -506,7 +711,7 @@ export default function ChecklistExecutionScreen() {
   }
 
   // Progresso visual (barra no header)
-  const progressPct = Math.round(((currentIndex) / total) * 100);
+  const progressPct = Math.round((currentIndex / total) * 100);
 
   // Se Inconforme e requiresEvidence, forçar evidência mesmo que ainda não
   // esteja marcado como requiresEvidence no dado — boa prática do card
@@ -558,7 +763,9 @@ export default function ChecklistExecutionScreen() {
         {/* Número + título */}
         <AppText style={styles.itemTitle}>
           {item.order}. {item.title}
-          {item.required ? <AppText style={styles.requiredMark}> *</AppText> : null}
+          {item.required ? (
+            <AppText style={styles.requiredMark}> *</AppText>
+          ) : null}
         </AppText>
 
         {/* Descrição */}
@@ -589,7 +796,11 @@ export default function ChecklistExecutionScreen() {
         )}
 
         {item.type === 'TEXT' && (
-          <TextAreaInput value={item.textAnswer} onChange={handleText} placeholder="Descreva aqui..." />
+          <TextAreaInput
+            value={item.textAnswer}
+            onChange={handleText}
+            placeholder="Descreva aqui..."
+          />
         )}
 
         {item.type === 'DATE' && (
@@ -648,15 +859,26 @@ export default function ChecklistExecutionScreen() {
         </AppText>
 
         <TouchableOpacity
-          style={styles.footerBtn}
+          style={[styles.footerBtn, submitting && styles.footerBtnDisabled]}
           onPress={goNext}
           activeOpacity={0.7}
-          accessibilityLabel={currentIndex < total - 1 ? 'Avançar para o próximo item' : 'Finalizar inspeção'}
+          disabled={submitting}
+          accessibilityLabel={
+            currentIndex < total - 1
+              ? 'Avançar para o próximo item'
+              : 'Finalizar inspeção'
+          }
         >
-          <AppText style={styles.footerBtnText}>
-            {currentIndex < total - 1 ? 'Avançar' : 'Finalizar'}
-          </AppText>
-          <ArrowRight size={16} color="#45A835" />
+          {submitting ? (
+            <ActivityIndicator size="small" color="#45A835" />
+          ) : (
+            <>
+              <AppText style={styles.footerBtnText}>
+                {currentIndex < total - 1 ? 'Avançar' : 'Finalizar'}
+              </AppText>
+              <ArrowRight size={16} color="#45A835" />
+            </>
+          )}
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -835,7 +1057,7 @@ const styles = StyleSheet.create({
   backButton: { padding: 4 },
   headerTitle: { flex: 1, textAlign: 'center' },
   headerField: { color: '#FFFFFF', fontSize: 15, fontFamily: 'Inter_700Bold' },
-  headerOps:   { color: '#45A835', fontSize: 15, fontFamily: 'Inter_700Bold' },
+  headerOps: { color: '#45A835', fontSize: 15, fontFamily: 'Inter_700Bold' },
   headerSpacer: { width: 30 },
 
   // Progress bar abaixo do header
@@ -933,6 +1155,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     minWidth: 80,
+    justifyContent: 'flex-end',
+  },
+  footerBtnDisabled: {
+    opacity: 0.5,
   },
   footerBtnText: {
     fontSize: 14,
@@ -946,7 +1172,12 @@ const styles = StyleSheet.create({
   },
 
   // Not found
-  notFound: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  notFound: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
   notFoundText: { fontSize: 15, color: '#555', fontFamily: 'Inter_400Regular' },
   backLink: { fontSize: 14, color: '#1E88E5', fontFamily: 'Inter_700Bold' },
 });

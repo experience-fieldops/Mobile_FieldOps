@@ -124,3 +124,73 @@ export interface InspectionProgressResponse {
   /** Percentual 0–100 (double). */
   progressPercentage: number;
 }
+
+// ─────────────────────────────────────────────────────────────
+// Execução de inspeção (em campo)
+// ─────────────────────────────────────────────────────────────
+
+export type ExecutionStatus =
+  'IN_PROGRESS' | 'PAUSED' | 'COMPLETED' | 'CANCELLED';
+
+/** Origem: Backend - ExecutionResponse.java */
+export interface ExecutionResponse {
+  id: number;
+  inspectionId: number;
+  technicianId: number;
+  technicianName: string;
+  status: ExecutionStatus;
+  startGpsLatitude: number | null;
+  startGpsLongitude: number | null;
+  endGpsLatitude: number | null;
+  endGpsLongitude: number | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  notes: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** POST /api/v1/inspections/{inspectionId}/executions */
+export interface StartExecutionRequest {
+  gpsLatitude: number;
+  gpsLongitude: number;
+  startedAt?: string;
+}
+
+/** PATCH /api/v1/executions/{executionId}/complete */
+export interface CompleteExecutionRequest {
+  endGpsLatitude?: number;
+  endGpsLongitude?: number;
+  completedAt?: string;
+  notes?: string;
+}
+
+/** POST /api/v1/executions/{executionId}/responses */
+export interface ChecklistResponseRequest {
+  snapshotItemId: number;
+  value?: string;
+  observation?: string;
+  notApplicable?: boolean;
+  gpsLatitude?: number;
+  gpsLongitude?: number;
+  respondedAt?: string;
+}
+
+/** Origem: Backend - ChecklistResponseDTO.java */
+export interface ChecklistResponseDTO {
+  id: number;
+  executionId: number;
+  snapshotItemId: number;
+  snapshotItemTitle: string;
+  snapshotItemCode: string;
+  value: string | null;
+  observation: string | null;
+  notApplicable: boolean;
+  gpsLatitude: number | null;
+  gpsLongitude: number | null;
+  respondedAt: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
