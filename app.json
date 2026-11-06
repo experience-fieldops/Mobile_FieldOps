@@ -23,7 +23,13 @@
     },
     "plugins": [
       "expo-font",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "O FieldOps usa sua localização para registrar onde a inspeção foi executada."
+        }
+      ]
     ]
   }
 }
