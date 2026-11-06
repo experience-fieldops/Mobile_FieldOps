@@ -33,12 +33,17 @@ type ApiOptions = Omit<RequestInit, 'headers'> & {
 async function request<T>(
   endpoint: string,
   token: string | null,
-  options: ApiOptions = {}
+  options: ApiOptions = {},
 ): Promise<T> {
   // Verifica se a URL da API está configurada
   if (!API_BASE_URL) {
     throw new Error('URL da API não configurada.');
   }
+
+  // multipart/form-data não deve ter Content-Type manual: o fetch precisa
+  // definir o boundary. Só aplicamos application/json para bodies comuns.
+  const isFormData =
+    typeof FormData !== 'undefined' && options.body instanceof FormData;
 
   // Monta e envia a requisição HTTP
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -47,7 +52,7 @@ async function request<T>(
     headers: {
       Accept: 'application/json',
 
-      ...(options.body != null
+      ...(options.body != null && !isFormData
         ? { 'Content-Type': 'application/json' }
         : {}),
 
@@ -96,7 +101,7 @@ async function request<T>(
 export async function apiRequest<T>(
   endpoint: string,
   token: string,
-  options: ApiOptions = {}
+  options: ApiOptions = {},
 ): Promise<T> {
   // Impede requisições autenticadas sem JWT
   if (!token) {
@@ -112,7 +117,7 @@ export async function apiRequest<T>(
  */
 export async function publicRequest<T>(
   endpoint: string,
-  options: ApiOptions = {}
+  options: ApiOptions = {},
 ): Promise<T> {
   return request<T>(endpoint, null, options);
 }
