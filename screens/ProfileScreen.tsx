@@ -16,14 +16,37 @@ import {
   HelpCircle,
   LogOut,
 } from 'lucide-react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useState, useCallback } from 'react';
+import { ActivityIndicator } from 'react-native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 
 import AppText from '../components/AppText';
 import { MainTabParamList } from '../navigation/AppNavigator';
+import { getAssignedInspections } from '../services/inspectionService';
 import { useAuth } from '../context/AuthContext';
 
 type ProfileNavProp = BottomTabNavigationProp<MainTabParamList, 'Perfil'>;
+
+/** Rótulo amigável para o papel do usuário. */
+function roleLabel(role?: string): string {
+  switch (role) {
+    case 'ADMIN':
+      return 'Administrador';
+    case 'SUPERVISOR':
+      return 'Supervisor';
+    case 'TECNICO':
+      return 'Técnico';
+    default:
+      return role ?? '';
+  }
+}
+
+interface Metrics {
+  completed: number;
+  approvalRate: number;
+  returned: number;
+}
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
@@ -70,13 +93,56 @@ function MenuItem({ icon, label, subtitle, isFirst }: MenuItemProps) {
 
 export default function ProfileScreen() {
   const navigation = useNavigation<ProfileNavProp>();
-  const { user, logout } = useAuth();
+  const { user, token, logout } = useAuth();
 
   // Fallback para quando o usuário ainda não estiver carregado
   const displayName = user?.name ?? '—';
-  const displayRole = user?.role ?? '';
+  const displayRole = roleLabel(user?.role);
   const displayOrg = user?.organization ?? '—';
   const initials = user?.name ? getInitials(user.name) : '?';
+
+  // Métricas derivadas das inspeções do técnico (não há endpoint dedicado —
+  // ver BACKEND_MELHORIAS.md B-07).
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [metricsLoading, setMetricsLoading] = useState(true);
+
+  const loadMetrics = useCallback(async () => {
+    if (!token || user == null) {
+      setMetricsLoading(false);
+      return;
+    }
+    setMetricsLoading(true);
+    try {
+      const page = await getAssignedInspections(token, user.id, 0, 100);
+      let completed = 0;
+      let approved = 0;
+      let returned = 0;
+      for (const insp of page.content) {
+        if (
+          insp.status === 'COMPLETED' ||
+          insp.status === 'UNDER_REVIEW' ||
+          insp.status === 'APPROVED'
+        ) {
+          completed += 1;
+        }
+        if (insp.status === 'APPROVED') approved += 1;
+        if (insp.status === 'REJECTED') returned += 1;
+      }
+      const approvalRate =
+        completed > 0 ? Math.round((approved / completed) * 100) : 0;
+      setMetrics({ completed, approvalRate, returned });
+    } catch {
+      setMetrics(null);
+    } finally {
+      setMetricsLoading(false);
+    }
+  }, [token, user]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadMetrics();
+    }, [loadMetrics]),
+  );
 
   // Observação: o Alert.alert do react-native-web é um stub vazio (no-op),
   // então a confirmação nunca aparecia na web e o logout() nunca era chamado.
@@ -124,39 +190,54 @@ export default function ProfileScreen() {
         showsVerticalScrollIndicator={false}
         overScrollMode="never"
       >
-        {/* Meu desempenho — estatísticas permanecem mock até endpoint dedicado */}
+        {/* Meu desempenho — métricas derivadas das inspeções do técnico */}
         <AppText style={styles.sectionTitle}>Meu desempenho</AppText>
 
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <AppText style={styles.statValueBlue}>12</AppText>
-            <AppText style={styles.statLabel}>
-              Inspeções{'\n'}concluídas
-            </AppText>
+        {metricsLoading ? (
+          <View style={styles.statsLoading}>
+            <ActivityIndicator color="#132539" />
           </View>
-          <View style={styles.statCard}>
-            <AppText style={styles.statValueGreen}>96%</AppText>
-            <AppText style={styles.statLabel}>
-              Porcentagem de{'\n'}Aprovações
-            </AppText>
+        ) : (
+          <View style={styles.statsRow}>
+            <View style={styles.statCard}>
+              <AppText style={styles.statValueBlue}>
+                {metrics?.completed ?? '—'}
+              </AppText>
+              <AppText style={styles.statLabel}>
+                Inspeções{'\n'}concluídas
+              </AppText>
+            </View>
+            <View style={styles.statCard}>
+              <AppText style={styles.statValueGreen}>
+                {metrics ? `${metrics.approvalRate}%` : '—'}
+              </AppText>
+              <AppText style={styles.statLabel}>
+                Porcentagem de{'\n'}Aprovações
+              </AppText>
+            </View>
+            <View style={styles.statCard}>
+              <AppText style={styles.statValueRed}>
+                {metrics?.returned ?? '—'}
+              </AppText>
+              <AppText style={styles.statLabel}>Devolvidas</AppText>
+            </View>
           </View>
-          <View style={styles.statCard}>
-            <AppText style={styles.statValueRed}>0</AppText>
-            <AppText style={styles.statLabel}>Devolvidas</AppText>
-          </View>
-        </View>
+        )}
 
         {/* Menu de opções */}
         <View style={styles.menuCard}>
-          <MenuItem
-            icon={<Building2 size={22} color="#555" />}
-            label="Organização"
-            subtitle={displayOrg}
-            isFirst
-          />
+          {user?.organization ? (
+            <MenuItem
+              icon={<Building2 size={22} color="#555" />}
+              label="Organização"
+              subtitle={displayOrg}
+              isFirst
+            />
+          ) : null}
           <MenuItem
             icon={<Settings size={22} color="#555" />}
             label="Configurações"
+            isFirst={!user?.organization}
           />
           <MenuItem
             icon={<Bell size={22} color="#555" />}
@@ -288,6 +369,12 @@ const styles = StyleSheet.create({
   statsRow: {
     flexDirection: 'row',
     gap: 10,
+    marginBottom: 20,
+  },
+  statsLoading: {
+    height: 90,
+    justifyContent: 'center',
+    alignItems: 'center',
     marginBottom: 20,
   },
   statCard: {
