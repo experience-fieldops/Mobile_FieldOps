@@ -263,3 +263,77 @@ export interface EquipmentResponse {
   createdAt: string;
   updatedAt: string;
 }
+
+// ─────────────────────────────────────────────────────────────
+// Sincronização offline
+// ─────────────────────────────────────────────────────────────
+
+export type SyncOperationType =
+  | 'START_INSPECTION'
+  | 'SAVE_RESPONSE'
+  | 'SAVE_NON_CONFORMITY'
+  | 'UPLOAD_EVIDENCE'
+  | 'COMPLETE_INSPECTION';
+
+export type SyncItemStatus =
+  'PENDING' | 'PROCESSING' | 'SUCCESS' | 'FAILED' | 'SKIPPED';
+
+export type SyncBatchStatus = 'SUCCESS' | 'PARTIAL' | 'FAILED';
+
+/** Operação offline a sincronizar (POST /api/v1/sync). */
+export interface SyncItemRequest {
+  idempotencyKey: string;
+  inspectionId: number;
+  operationType: SyncOperationType;
+  /** JSON serializado (string) específico da operação. */
+  payload: string;
+}
+
+export interface SyncRequest {
+  operations: SyncItemRequest[];
+}
+
+export interface SyncItemResult {
+  idempotencyKey: string;
+  inspectionId: number;
+  operationType: SyncOperationType;
+  status: SyncItemStatus;
+  errorMessage: string | null;
+}
+
+export interface SyncResponse {
+  status: SyncBatchStatus;
+  total: number;
+  synced: SyncItemResult[];
+  failed: SyncItemResult[];
+  processedAt: string;
+}
+
+/** Status de sincronização de uma inspeção (GET .../sync-status). */
+export interface SyncStatusResponse {
+  inspectionId: number;
+  totalOperations: number;
+  pending: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+  lastSyncAt: string | null;
+}
+
+/**
+ * Ordem disponível para download offline
+ * (GET /api/v1/my-orders/pending-sync), com o template completo.
+ */
+export interface PendingSyncInspectionResponse {
+  id: number;
+  clientName: string;
+  siteName: string;
+  siteAddress: string | null;
+  equipmentName: string | null;
+  equipmentQrCode: string | null;
+  scheduledDate: string;
+  status: BackendInspectionStatus;
+  templateVersionId: number;
+  templateTitle: string;
+  sections: unknown[] | null;
+}

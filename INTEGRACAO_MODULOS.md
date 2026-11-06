@@ -221,7 +221,14 @@ Regra de ouro: **M0 e M1 vêm primeiro**. Eles desbloqueiam todo o resto e não 
 
 ---
 
-## M7 — Sincronização offline  `[ ]`
+## M7 — Sincronização offline  `[~]` (parcial — opção pragmática)
+
+> **Status (entregue):** download real (`pending-sync`) + seções
+> "enviadas/aprovadas" derivadas do status das inspeções. A **fila de upload
+> offline NÃO foi implementada** porque a execução (M4/M5) grava online e não
+> há fila local — implementar a fila é um épico que refatora módulos já
+> entregues. Ver `BACKEND_MELHORIAS.md` B-11. O `pushSync` já está tipado no
+> `syncService` para quando a fila existir.
 
 **Objetivo:** `SyncScreen` com download e upload reais.
 

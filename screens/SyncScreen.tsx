@@ -1,9 +1,12 @@
+import { useState, useCallback } from 'react';
 import {
   View,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
   StatusBar,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import {
   WifiOff,
@@ -12,12 +15,17 @@ import {
   User,
   UploadCloud,
   CheckCircle2,
+  AlertCircle,
 } from 'lucide-react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 
 import AppText from '../components/AppText';
 import { MainTabParamList } from '../navigation/AppNavigator';
+import { getPendingSync } from '../services/syncService';
+import { getAssignedInspections } from '../services/inspectionService';
+import { formatDateBR } from '../data/mappers';
+import { useAuth } from '../context/AuthContext';
 
 type SyncNavProp = BottomTabNavigationProp<MainTabParamList, 'Sincronizar'>;
 
@@ -25,53 +33,12 @@ type SyncNavProp = BottomTabNavigationProp<MainTabParamList, 'Sincronizar'>;
 // Tipos de sincronização
 // ─────────────────────────────────────────────────────────────
 
-type SyncStatus = 'pending' | 'sent' | 'approved';
-
 interface SyncItem {
   id: string;
   code: string;
   title: string;
   sentAt?: string; // presente em 'sent' e 'approved'
 }
-
-// ─────────────────────────────────────────────────────────────
-// Dados mockados
-// ─────────────────────────────────────────────────────────────
-
-const PENDING_QUEUE: SyncItem[] = [
-  { id: 'q1', code: 'INSP-03', title: 'Inspeção estrutural - Lifter do Motor' },
-  { id: 'q2', code: 'INSP-02', title: 'Lubrificação dos rolamentos' },
-];
-
-const SENT_ITEMS: SyncItem[] = [
-  {
-    id: 's1',
-    code: 'INSP-01',
-    title: 'Inspeção estrutural - Lifter do Motor',
-    sentAt: '20/07/2026',
-  },
-  {
-    id: 's2',
-    code: 'INSP-01',
-    title: 'Inspeção estrutural - Lifter do Motor',
-    sentAt: '13/05/2026',
-  },
-];
-
-const APPROVED_ITEMS: SyncItem[] = [
-  {
-    id: 'a1',
-    code: 'INSP-01',
-    title: 'Inspeção estrutural - Lifter do Motor',
-    sentAt: '20/07/2026',
-  },
-  {
-    id: 'a2',
-    code: 'INSP-01',
-    title: 'Inspeção estrutural - Lifter do Motor',
-    sentAt: '09/03/2026',
-  },
-];
 
 // ─────────────────────────────────────────────────────────────
 // Componente: card da fila pendente
@@ -156,6 +123,76 @@ function SectionBlock({
 
 export default function SyncScreen() {
   const navigation = useNavigation<SyncNavProp>();
+  const { user, token } = useAuth();
+
+  const [pending, setPending] = useState<SyncItem[]>([]);
+  const [sent, setSent] = useState<SyncItem[]>([]);
+  const [approved, setApproved] = useState<SyncItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(
+    async (mode: 'initial' | 'refresh' = 'initial') => {
+      if (!token || user == null) {
+        setError('Sessão inválida. Faça login novamente.');
+        setLoading(false);
+        return;
+      }
+
+      if (mode === 'refresh') setRefreshing(true);
+      else setLoading(true);
+      setError(null);
+
+      try {
+        // Fila para sincronização: ordens disponíveis p/ trabalho offline.
+        const pendingOrders = await getPendingSync(token, user.id);
+        setPending(
+          pendingOrders.map((o) => ({
+            id: String(o.id),
+            code: `INSP-${o.id}`,
+            title: o.templateTitle,
+          })),
+        );
+
+        // Enviadas / aprovadas: derivadas do status das inspeções do técnico.
+        const page = await getAssignedInspections(token, user.id, 0, 100);
+        const sentItems: SyncItem[] = [];
+        const approvedItems: SyncItem[] = [];
+        for (const insp of page.content) {
+          const card: SyncItem = {
+            id: String(insp.id),
+            code: `INSP-${insp.id}`,
+            title: insp.templateTitle,
+            sentAt: formatDateBR(insp.completedAtServer ?? insp.updatedAt),
+          };
+          if (insp.status === 'COMPLETED' || insp.status === 'UNDER_REVIEW') {
+            sentItems.push(card);
+          } else if (insp.status === 'APPROVED') {
+            approvedItems.push(card);
+          }
+        }
+        setSent(sentItems);
+        setApproved(approvedItems);
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'Erro ao carregar sincronização.';
+        setError(message);
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [token, user],
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      load('initial');
+    }, [load]),
+  );
 
   return (
     <View style={styles.container}>
@@ -182,46 +219,86 @@ export default function SyncScreen() {
         </AppText>
       </View>
 
-      {/* ── Conteúdo rolável ────────────────────────────── */}
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-        overScrollMode="never"
-      >
-        {/* Fila para sincronização */}
-        <SectionBlock
-          title="Fila para sincronização"
-          subtitle="Inspeções pendentes de envio"
-          backgroundColor="#FFF8E1"
+      {/* ── Conteúdo ────────────────────────────────────── */}
+      {loading ? (
+        <View style={styles.centerState}>
+          <ActivityIndicator size="large" color="#132539" />
+        </View>
+      ) : error ? (
+        <View style={styles.centerState}>
+          <AlertCircle size={44} color="#E53935" />
+          <AppText style={styles.errorText}>{error}</AppText>
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={() => load('initial')}
+            activeOpacity={0.7}
+          >
+            <AppText style={styles.retryBtnText}>Tentar novamente</AppText>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <ScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          overScrollMode="never"
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => load('refresh')}
+            />
+          }
         >
-          {PENDING_QUEUE.map((item) => (
-            <PendingCard key={item.id} item={item} />
-          ))}
-        </SectionBlock>
+          {/* Fila para sincronização */}
+          <SectionBlock
+            title="Fila para sincronização"
+            subtitle="Ordens disponíveis para execução offline"
+            backgroundColor="#FFF8E1"
+          >
+            {pending.length === 0 ? (
+              <AppText style={styles.emptySection}>
+                Nenhuma ordem pendente.
+              </AppText>
+            ) : (
+              pending.map((item) => <PendingCard key={item.id} item={item} />)
+            )}
+          </SectionBlock>
 
-        {/* Enviadas */}
-        <SectionBlock
-          title="Enviadas"
-          subtitle="Inspeções enviadas aguardando validação"
-          backgroundColor="#EDE7F6"
-        >
-          {SENT_ITEMS.map((item) => (
-            <SentCard key={item.id} item={item} status="sent" />
-          ))}
-        </SectionBlock>
+          {/* Enviadas */}
+          <SectionBlock
+            title="Enviadas"
+            subtitle="Inspeções enviadas aguardando validação"
+            backgroundColor="#EDE7F6"
+          >
+            {sent.length === 0 ? (
+              <AppText style={styles.emptySection}>
+                Nenhuma inspeção enviada.
+              </AppText>
+            ) : (
+              sent.map((item) => (
+                <SentCard key={item.id} item={item} status="sent" />
+              ))
+            )}
+          </SectionBlock>
 
-        {/* Aprovadas */}
-        <SectionBlock
-          title="Aprovadas"
-          subtitle="Inspeções sincronizadas e validadas"
-          backgroundColor="#E8F5E9"
-        >
-          {APPROVED_ITEMS.map((item) => (
-            <SentCard key={item.id} item={item} status="approved" />
-          ))}
-        </SectionBlock>
-      </ScrollView>
+          {/* Aprovadas */}
+          <SectionBlock
+            title="Aprovadas"
+            subtitle="Inspeções sincronizadas e validadas"
+            backgroundColor="#E8F5E9"
+          >
+            {approved.length === 0 ? (
+              <AppText style={styles.emptySection}>
+                Nenhuma inspeção aprovada.
+              </AppText>
+            ) : (
+              approved.map((item) => (
+                <SentCard key={item.id} item={item} status="approved" />
+              ))
+            )}
+          </SectionBlock>
+        </ScrollView>
+      )}
 
       {/* ── Barra de navegação inferior ─────────────────── */}
       <View style={styles.tabBar}>
@@ -265,7 +342,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 15,
-    paddingBottom: 25
+    paddingBottom: 25,
   },
   headerBrand: {},
   headerBrandField: {
@@ -328,6 +405,38 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   sectionCards: { gap: 10 },
+  emptySection: {
+    fontSize: 13,
+    fontFamily: 'Inter_400Regular',
+    color: '#888',
+  },
+
+  // Estados de carregamento / erro
+  centerState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 32,
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#E53935',
+    fontFamily: 'Inter_400Regular',
+    textAlign: 'center',
+  },
+  retryBtn: {
+    marginTop: 8,
+    backgroundColor: '#132539',
+    borderRadius: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+  },
+  retryBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Inter_700Bold',
+  },
 
   // Card
   card: {

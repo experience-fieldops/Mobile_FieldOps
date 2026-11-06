@@ -17,6 +17,7 @@
 | B-08 | 🟠 Média | `requestingUserId`/`technicianId` via query |
 | B-09 | 🟡 Baixa | `BOOLEAN`/`DATE` — formato do `value` |
 | B-10 | 🟠 Média | Severidade da NC definida pelo cliente |
+| B-11 | 🟠 Média | Fila de upload offline não implementada no app |
 
 ---
 
@@ -141,6 +142,39 @@ default `MEDIUM` quando não selecionada.
 
 **Impacto.** Sem alinhamento, severidade e `evidenceAttached` podem ficar
 inconsistentes entre app e backend.
+
+---
+
+## B-11 — Fila de upload offline não implementada no app (M7) 🟠
+
+**Situação.** O backend oferece `POST /api/v1/sync` para receber um **lote de
+operações offline** (`START_INSPECTION`, `SAVE_RESPONSE`, `UPLOAD_EVIDENCE`,
+`COMPLETE_INSPECTION`…), cada uma com `idempotencyKey` e `payload`. Isso
+pressupõe que o app **acumule operações localmente sem internet** e as envie
+depois.
+
+**Conflito com o app atual.** A execução (M4/M5) grava **online**: a
+`ChecklistExecutionScreen` chama `startExecution`, `saveResponse`,
+`uploadEvidence` e `completeExecution` direto nos endpoints REST, exigindo
+conexão no momento. **Não existe fila local.** Portanto o `POST /sync` não é
+acionado pela UI hoje.
+
+**O que o M7 entregou (opção pragmática).**
+- **Download offline:** `GET /my-orders/pending-sync` alimenta a seção "Fila
+  para sincronização" (ordens disponíveis).
+- **Enviadas/Aprovadas:** derivadas do `status` das inspeções do técnico
+  (`COMPLETED`/`UNDER_REVIEW` → enviadas; `APPROVED` → aprovadas).
+- `services/syncService.ts` já traz `pushSync` **tipado e pronto**, mas não
+  acionado pela tela.
+
+**Trabalho futuro (fora do M7).** Implementar a fila offline de verdade exige:
+1. Persistir operações localmente (ex.: AsyncStorage) quando sem rede.
+2. Refatorar a execução (M4/M5) para enfileirar em vez de chamar a API direto.
+3. Drenar a fila via `POST /api/v1/sync`, tratando `idempotencyKey`,
+   `SyncItemResult` (SUCCESS/FAILED/SKIPPED) e reprocessamento dos que falharam.
+
+Este é um épico próprio (mexe em módulos já entregues) e foi deliberadamente
+adiado para não misturar refatoração com a entrega do M7.
 
 ---
 
