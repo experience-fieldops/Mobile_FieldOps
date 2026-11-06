@@ -16,6 +16,7 @@
 | B-07 | 🟡 Baixa | Métricas do técnico |
 | B-08 | 🟠 Média | `requestingUserId`/`technicianId` via query |
 | B-09 | 🟡 Baixa | `BOOLEAN`/`DATE` — formato do `value` |
+| B-10 | 🟠 Média | Severidade da NC definida pelo cliente |
 
 ---
 
@@ -118,6 +119,28 @@ e validar `value` contra ele quando `responseType = CONFORMITY`. Expor o enum no
 **Impacto.** O app envia `BOOLEAN` como `"true"`/`"false"` e `DATE` como o texto digitado (máscara `dd/mm/aaaa`). Pode não bater com o parser do backend.
 
 **Sugestão.** Documentar o formato esperado por `responseType` (ex.: BOOLEAN = `"true"|"false"`, DATE = ISO `yyyy-mm-dd`). Se for ISO, o app precisa converter a máscara antes de enviar.
+
+---
+
+## B-10 — Severidade da não conformidade definida pelo cliente 🟠
+
+**Situação.** Ao marcar um item como `Inconforme`, o app abre uma NC via
+`POST /inspections/{id}/non-conformities` com `severity` (LOW/MEDIUM/HIGH/CRITICAL).
+Hoje a severidade é **escolhida pelo técnico** na tela (mini-seletor), com
+default `MEDIUM` quando não selecionada.
+
+**Pontos a confirmar com o backend.**
+- Existe regra de negócio que **derive** a severidade (ex.: do tipo do item),
+  tornando a escolha do técnico desnecessária ou apenas sugestiva?
+- O campo `evidenceAttached` do `NonConformityRequest` deve ser calculado pelo
+  backend (a partir das evidências realmente enviadas) em vez de informado pelo
+  cliente? Hoje o app envia `evidenceAttached` com base nas fotos locais, o que
+  pode divergir do que de fato subiu.
+- `title` da NC: o app usa o título do item do checklist. Confirmar se é
+  aceitável ou se deve haver um título próprio.
+
+**Impacto.** Sem alinhamento, severidade e `evidenceAttached` podem ficar
+inconsistentes entre app e backend.
 
 ---
 
