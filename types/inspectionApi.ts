@@ -243,3 +243,23 @@ export interface NonConformityResponse {
   createdAt: string;
   updatedAt: string;
 }
+
+// ─────────────────────────────────────────────────────────────
+// Equipamentos
+// ─────────────────────────────────────────────────────────────
+
+export type EquipmentStatus = 'ACTIVE' | 'INACTIVE' | 'DECOMMISSIONED';
+
+/** Origem: Backend - EquipmentResponse.java */
+export interface EquipmentResponse {
+  id: number;
+  name: string;
+  description: string | null;
+  qrCode: string | null;
+  status: EquipmentStatus;
+  siteId: number;
+  siteName: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+}
