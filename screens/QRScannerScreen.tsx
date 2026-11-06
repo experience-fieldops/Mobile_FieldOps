@@ -1,13 +1,24 @@
 import { useState, useCallback } from 'react';
-import { View, TouchableOpacity, StyleSheet, StatusBar } from 'react-native';
-import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
+import {
+  View,
+  TouchableOpacity,
+  StyleSheet,
+  StatusBar,
+  ActivityIndicator,
+} from 'react-native';
+import {
+  CameraView,
+  useCameraPermissions,
+  BarcodeScanningResult,
+} from 'expo-camera';
 import { ArrowLeft, ScanLine } from 'lucide-react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import AppText from '../components/AppText';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import { MOCK_CHECKLIST } from '../data/inspections';
+import { getEquipmentByQrCode } from '../services/equipmentService';
+import { useAuth } from '../context/AuthContext';
 
 type ScannerRouteProp = RouteProp<RootStackParamList, 'QRScanner'>;
 type ScannerNavProp = NativeStackNavigationProp<RootStackParamList>;
@@ -16,9 +27,12 @@ export default function QRScannerScreen() {
   const navigation = useNavigation<ScannerNavProp>();
   const route = useRoute<ScannerRouteProp>();
   const { inspectionId } = route.params;
+  const { token } = useAuth();
 
   const [permission, requestPermission] = useCameraPermissions();
   const [scanned, setScanned] = useState(false);
+  const [resolving, setResolving] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
 
   // ── Permissão ainda não solicitada ───────────────────────
   if (!permission) {
@@ -66,25 +80,45 @@ export default function QRScannerScreen() {
   }
 
   // ── Leitura do QR code ───────────────────────────────────
+  // Resolve o equipamento no backend a partir do conteúdo lido e, se
+  // válido e ativo, segue para a execução do checklist da inspeção.
   const handleBarCodeScanned = useCallback(
-    ({ data }: BarcodeScanningResult) => {
-      if (scanned) return;
+    async ({ data }: BarcodeScanningResult) => {
+      if (scanned || resolving) return;
       setScanned(true);
+      setScanError(null);
 
-      // O QR code do equipamento deve conter o inspectionId (numérico).
-      // Se o dado lido corresponde a uma inspeção existente, abre o formulário.
-      // Caso contrário, usa o inspectionId passado como parâmetro (fallback dev).
-      // TODO(M6): resolver o QR via GET /equipments/qrcode/{qrCode} em vez do mock.
-      const scannedId = Number(data);
-      const targetId =
-        Number.isFinite(scannedId) && MOCK_CHECKLIST[scannedId]
-          ? scannedId
-          : inspectionId;
+      if (!token) {
+        setScanError('Sessão inválida. Faça login novamente.');
+        return;
+      }
 
-      navigation.replace('InspectionForm', { inspectionId: targetId });
+      setResolving(true);
+      try {
+        const equipment = await getEquipmentByQrCode(token, data);
+
+        if (equipment.status !== 'ACTIVE') {
+          setScanError(
+            `Equipamento "${equipment.name}" não está ativo (${equipment.status}).`,
+          );
+          return;
+        }
+
+        navigation.replace('ChecklistExecution', { inspectionId });
+      } catch {
+        setScanError('QR code não reconhecido. Tente novamente.');
+      } finally {
+        setResolving(false);
+      }
     },
-    [scanned, inspectionId, navigation],
+    [scanned, resolving, token, inspectionId, navigation],
   );
+
+  // Permite tentar de novo após erro de leitura.
+  function rescan() {
+    setScanned(false);
+    setScanError(null);
+  }
 
   return (
     <View style={styles.container}>
@@ -145,12 +179,25 @@ export default function QRScannerScreen() {
         </View>
       </View>
 
-      {/* ── Botão de reescanear (aparece após leitura falha) ── */}
-      {scanned && (
+      {/* ── Resolvendo o equipamento ───────────────────────── */}
+      {resolving && (
         <View style={styles.rescanContainer}>
+          <View style={styles.resolvingBox}>
+            <ActivityIndicator color="#FFFFFF" />
+            <AppText style={styles.rescanText}>
+              Verificando equipamento…
+            </AppText>
+          </View>
+        </View>
+      )}
+
+      {/* ── Erro de leitura + reescanear ───────────────────── */}
+      {scanned && !resolving && scanError && (
+        <View style={styles.rescanContainer}>
+          <AppText style={styles.scanErrorText}>{scanError}</AppText>
           <TouchableOpacity
             style={styles.rescanBtn}
-            onPress={() => setScanned(false)}
+            onPress={rescan}
             activeOpacity={0.7}
           >
             <AppText style={styles.rescanText}>Escanear novamente</AppText>
@@ -282,6 +329,22 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
     fontFamily: 'Inter_700Bold',
+  },
+  resolvingBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  scanErrorText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    textAlign: 'center',
+    marginBottom: 12,
+    paddingHorizontal: 32,
+    backgroundColor: 'rgba(229,57,53,0.85)',
+    borderRadius: 6,
+    paddingVertical: 8,
   },
 
   // Permissão
