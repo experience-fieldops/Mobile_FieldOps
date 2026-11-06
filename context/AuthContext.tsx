@@ -1,4 +1,3 @@
-
 import {
   createContext,
   useContext,
@@ -19,11 +18,7 @@ interface AuthContextValue {
   user: User | null;
   token: string | null;
   loading: boolean;
-  login: (
-    email: string,
-    password: string,
-    persist: boolean
-  ) => Promise<void>;
+  login: (email: string, password: string, persist: boolean) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -40,11 +35,7 @@ const OLD_STORAGE_KEY = '@fieldops:user';
 
 const isNative = Platform.OS !== 'web';
 
-export function AuthProvider({
-  children,
-}: {
-  children: ReactNode;
-}) {
+export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -60,9 +51,7 @@ export function AuthProvider({
 
         if (!isNative) return;
 
-        const raw = await SecureStore.getItemAsync(
-          SESSION_KEY
-        );
+        const raw = await SecureStore.getItemAsync(SESSION_KEY);
 
         if (!raw) return;
 
@@ -85,10 +74,7 @@ export function AuthProvider({
           setToken(session.token);
         }
       } catch (error) {
-        console.error(
-          'Erro ao restaurar sessão:',
-          error
-        );
+        console.error('Erro ao restaurar sessão:', error);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -103,28 +89,22 @@ export function AuthProvider({
 
   // Login pelo backend
   const login = useCallback(
-    async (
-      email: string,
-      password: string,
-      persist: boolean
-    ) => {
+    async (email: string, password: string, persist: boolean) => {
       const response = await authenticate(email, password);
 
       console.log('JWT recebido:', {
-  possuiToken: Boolean(response.token),
-  tipo: response.type,
-  expiracaoMs: response.expiresIn,
-  usuario: response.user.email,
-  });
+        possuiToken: Boolean(response.token),
+        tipo: response.type,
+        expiracaoMs: response.expiresIn,
+        usuario: response.user.email,
+      });
 
       if (
         !response.token ||
         !Number.isFinite(response.expiresIn) ||
         response.expiresIn <= 0
       ) {
-        throw new Error(
-          'Resposta de autenticação inválida.'
-        );
+        throw new Error('Resposta de autenticação inválida.');
       }
 
       const authenticatedUser: User = {
@@ -132,7 +112,7 @@ export function AuthProvider({
         name: response.user.name,
         email: response.user.email,
         role: response.user.role as User['role'],
-        organization: 'FieldOps',
+        // organization não é fornecido pelo backend (ver BACKEND_MELHORIAS.md B-06).
       };
 
       const session: StoredSession = {
@@ -143,10 +123,7 @@ export function AuthProvider({
 
       if (isNative) {
         if (persist) {
-          await SecureStore.setItemAsync(
-            SESSION_KEY,
-            JSON.stringify(session)
-          );
+          await SecureStore.setItemAsync(SESSION_KEY, JSON.stringify(session));
         } else {
           await SecureStore.deleteItemAsync(SESSION_KEY);
         }
@@ -155,7 +132,7 @@ export function AuthProvider({
       setUser(authenticatedUser);
       setToken(response.token);
     },
-    []
+    [],
   );
 
   // Logout
@@ -171,9 +148,7 @@ export function AuthProvider({
   }, []);
 
   return (
-    <AuthContext.Provider
-      value={{ user, token, loading, login, logout }}
-    >
+    <AuthContext.Provider value={{ user, token, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
@@ -183,9 +158,7 @@ export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
 
   if (!ctx) {
-    throw new Error(
-      'useAuth deve ser usado dentro de AuthProvider'
-    );
+    throw new Error('useAuth deve ser usado dentro de AuthProvider');
   }
 
   return ctx;

@@ -99,6 +99,17 @@
   (`GET /clients` → `/clients/{id}/sites`). Fica como evolução futura se for
   preciso ver equipamentos além dos sites das inspeções do técnico.
 
+## M9 — Perfil
+
+- **Métricas derivadas client-side.** Sem endpoint de métricas (B-07), a tela
+  calcula "concluídas / % aprovações / devolvidas" a partir das inspeções do
+  técnico (`getAssignedInspections`). Limitação: usa só a página retornada
+  (size=100), não o histórico inteiro. Endpoint dedicado fica como futuro.
+- **`organization` removido.** O hardcode `'FieldOps'` saiu do `AuthContext`
+  (B-06). A tela só mostra o item "Organização" se o backend fornecer o campo.
+- **Rótulo de `role`.** `TECNICO`→"Técnico", `ADMIN`→"Administrador",
+  `SUPERVISOR`→"Supervisor".
+
 ---
 
 ## Itens em aberto que dependem do backend
