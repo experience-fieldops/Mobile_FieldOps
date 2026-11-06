@@ -37,7 +37,7 @@ Regra de ouro: **M0 e M1 vêm primeiro**. Eles desbloqueiam todo o resto e não 
 
 ---
 
-## M0 — Fundação HTTP e configuração  `[ ]`
+## M0 — Fundação HTTP e configuração  `[x]`
 
 **Objetivo:** ter um único cliente HTTP autenticado e uma única fonte de base URL antes de qualquer tela tocar na rede.
 
@@ -67,7 +67,7 @@ Regra de ouro: **M0 e M1 vêm primeiro**. Eles desbloqueiam todo o resto e não 
 
 ---
 
-## M1 — Camada de tipos e mapeamento  `[ ]`
+## M1 — Camada de tipos e mapeamento  `[x]`
 
 **Objetivo:** criar os *view models* da UI e as funções que convertem os DTOs do backend para eles. É o módulo que derruba o build quebrado.
 
@@ -97,7 +97,7 @@ Regra de ouro: **M0 e M1 vêm primeiro**. Eles desbloqueiam todo o resto e não 
 
 ---
 
-## M2 — Lista de inspeções  `[ ]`
+## M2 — Lista de inspeções  `[x]`
 
 **Objetivo:** `InspectionsScreen` consumindo dados reais.
 
@@ -122,7 +122,7 @@ Regra de ouro: **M0 e M1 vêm primeiro**. Eles desbloqueiam todo o resto e não 
 
 ---
 
-## M3 — Detalhe da inspeção  `[ ]`
+## M3 — Detalhe da inspeção  `[x]`
 
 **Objetivo:** `InspectionDetailScreen` com `GET /inspections/{id}` e progresso real.
 
@@ -145,7 +145,7 @@ Regra de ouro: **M0 e M1 vêm primeiro**. Eles desbloqueiam todo o resto e não 
 
 ---
 
-## M4 — Execução de checklist (fluxo crítico)  `[ ]`
+## M4 — Execução de checklist (fluxo crítico)  `[x]`
 
 **Objetivo:** `ChecklistExecutionScreen` persistindo execução e respostas.
 
@@ -175,7 +175,7 @@ Regra de ouro: **M0 e M1 vêm primeiro**. Eles desbloqueiam todo o resto e não 
 
 ---
 
-## M5 — Evidências e não conformidades  `[ ]`
+## M5 — Evidências e não conformidades  `[x]`
 
 **Objetivo:** anexar fotos e registrar não conformidades durante a execução.
 
@@ -199,7 +199,7 @@ Regra de ouro: **M0 e M1 vêm primeiro**. Eles desbloqueiam todo o resto e não 
 
 ---
 
-## M6 — QR Scanner  `[ ]`
+## M6 — QR Scanner  `[x]`
 
 **Objetivo:** `QRScannerScreen` resolvendo o QR contra o backend.
 
@@ -257,7 +257,7 @@ Regra de ouro: **M0 e M1 vêm primeiro**. Eles desbloqueiam todo o resto e não 
 
 ---
 
-## M8 — Equipamentos  `[ ]`
+## M8 — Equipamentos  `[x]`
 
 **Objetivo:** `EquipmentScreen` (hoje placeholder) listando equipamentos.
 
@@ -276,7 +276,7 @@ Regra de ouro: **M0 e M1 vêm primeiro**. Eles desbloqueiam todo o resto e não 
 
 ---
 
-## M9 — Perfil e métricas  `[ ]`
+## M9 — Perfil e métricas  `[x]`
 
 **Objetivo:** `ProfileScreen` sem dados fabricados.
 

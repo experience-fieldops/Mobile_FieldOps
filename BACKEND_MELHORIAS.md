@@ -95,9 +95,19 @@ e validar `value` contra ele quando `responseType = CONFORMITY`. Expor o enum no
 
 **Problema.** Não há endpoint de métricas do técnico (inspeções concluídas, % de aprovação, devolvidas).
 
-**Impacto.** A tela de perfil exibe números fixos (mock).
+**Impacto.** A tela de perfil exibia números fixos (mock).
 
-**Sugestão.** Criar algo como `GET /api/v1/technicians/{id}/metrics`, ou deixaremos a UI derivar client-side via listagens (menos eficiente).
+**Resolvido parcialmente no M9 (client-side).** O app agora **deriva** as
+métricas a partir de `GET /api/v1/inspections/assigned` (concluídas =
+`COMPLETED`+`UNDER_REVIEW`+`APPROVED`; % aprovações = `APPROVED`/concluídas;
+devolvidas = `REJECTED`). Limitações dessa abordagem:
+- só considera as inspeções retornadas na página (hoje `size=100`), não o
+  histórico completo do técnico;
+- faz um fetch extra na tela de perfil.
+
+**Sugestão (futuro).** Um endpoint dedicado `GET /api/v1/technicians/{id}/metrics`
+daria números precisos (histórico inteiro) e mais baratos. Enquanto não existir,
+a derivação client-side atende.
 
 ---
 
