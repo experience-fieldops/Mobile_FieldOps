@@ -36,11 +36,7 @@ export type Priority = 'Alta' | 'Média' | 'Baixa';
  * status nativo — é derivado de scheduledDate + status (D-14).
  */
 export type InspectionStatus =
-  | 'Atribuída'
-  | 'Em Andamento'
-  | 'Atrasada'
-  | 'Devolvida'
-  | 'Concluída';
+  'Atribuída' | 'Em Andamento' | 'Atrasada' | 'Devolvida' | 'Concluída';
 
 /** Inspeção no formato que as telas de lista e detalhe consomem. */
 export interface Inspection {
@@ -73,11 +69,7 @@ export interface Inspection {
  * A correspondência rótulo PT ↔ `value` precisa ser alinhada com o backend.
  */
 export type ChecklistAnswer =
-  | 'Conforme'
-  | 'Atenção'
-  | 'Inconforme'
-  | 'Não verificado'
-  | null;
+  'Conforme' | 'Atenção' | 'Inconforme' | 'Não verificado' | null;
 
 /** Evidência fotográfica anexada localmente a um item. */
 export interface ChecklistEvidence {
@@ -93,13 +85,10 @@ export interface ChecklistEvidence {
  * responseType do backend — é tratado via recurso de evidência.
  */
 export type ChecklistItemType =
-  | 'CONFORMITY'
-  | 'TEXT'
-  | 'NUMBER'
-  | 'BOOLEAN'
-  | 'CHOICE'
-  | 'DATE'
-  | 'PHOTO';
+  'CONFORMITY' | 'TEXT' | 'NUMBER' | 'BOOLEAN' | 'CHOICE' | 'DATE' | 'PHOTO';
+
+/** Severidade da não conformidade (espelha o enum do backend). */
+export type Severity = 'Baixa' | 'Média' | 'Alta' | 'Crítica';
 
 /** Campos comuns a todos os itens, acessados sem checar `type`. */
 interface ChecklistItemBase {
@@ -112,6 +101,11 @@ interface ChecklistItemBase {
   observation: string;
   requiresEvidence?: boolean;
   evidences: ChecklistEvidence[];
+  /**
+   * Severidade escolhida quando o item é marcado como Inconforme.
+   * Usada para abrir uma não conformidade no backend (D-07/M5).
+   */
+  ncSeverity?: Severity;
 }
 
 export interface ConformityItem extends ChecklistItemBase {

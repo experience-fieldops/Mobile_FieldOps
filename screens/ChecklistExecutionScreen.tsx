@@ -36,10 +36,12 @@ import {
   ConformityItem,
   ChecklistAnswer,
   ChecklistEvidence,
+  Severity,
 } from '../data/inspections';
 import {
   mapSnapshotsToChecklist,
   toChecklistResponseRequest,
+  mapSeverity,
 } from '../data/mappers';
 import { getInspectionById } from '../services/inspectionService';
 import {
@@ -47,6 +49,8 @@ import {
   saveResponse,
   completeExecution,
 } from '../services/executionService';
+import { uploadEvidence } from '../services/evidenceService';
+import { createNonConformity } from '../services/nonConformityService';
 import { getCurrentCoordinates } from '../services/location';
 import { useAuth } from '../context/AuthContext';
 import { RootStackParamList } from '../navigation/AppNavigator';
@@ -579,6 +583,10 @@ export default function ChecklistExecutionScreen() {
     (observation: string) => updateItem({ observation }),
     [currentIndex],
   );
+  const handleSeverity = useCallback(
+    (ncSeverity: Severity) => updateItem({ ncSeverity }),
+    [currentIndex],
+  );
 
   const handleAddEvidence = useCallback(
     (ev: ChecklistEvidence) => {
@@ -618,7 +626,7 @@ export default function ChecklistExecutionScreen() {
     }
   }
 
-  // Envia todas as respostas e finaliza a execução no backend.
+  // Envia respostas, evidências e não conformidades, e finaliza a execução.
   async function submitChecklist() {
     if (!token || user == null || executionId == null) {
       Alert.alert('Erro', 'Execução não inicializada.');
@@ -629,15 +637,37 @@ export default function ChecklistExecutionScreen() {
     try {
       const respondedAt = new Date().toISOString();
 
-      // Grava cada item respondido sequencialmente.
       for (const it of items) {
         if (it.id == null) continue;
-        await saveResponse(
+
+        // 1) Grava a resposta do item e captura o responseId.
+        const saved = await saveResponse(
           token,
           executionId,
           user.id,
           toChecklistResponseRequest(it, { respondedAt }),
         );
+
+        // 2) Não conformidade quando item é Inconforme.
+        let nonConformityId: number | undefined;
+        if (it.type === 'CONFORMITY' && it.answer === 'Inconforme') {
+          const nc = await createNonConformity(token, inspectionId, {
+            title: it.title,
+            severity: mapSeverity(it.ncSeverity ?? 'Média'),
+            description: it.observation || undefined,
+            snapshotItemId: it.id,
+            evidenceAttached: it.evidences.length > 0,
+          });
+          nonConformityId = nc.id;
+        }
+
+        // 3) Sobe cada evidência vinculada à resposta (e à NC, se houver).
+        for (const ev of it.evidences) {
+          await uploadEvidence(token, inspectionId, user.id, ev.uri, {
+            responseId: saved.id,
+            nonConformityId,
+          });
+        }
       }
 
       const coords = await getCurrentCoordinates().catch(() => null);
@@ -813,6 +843,44 @@ export default function ChecklistExecutionScreen() {
             value={item.choiceAnswer}
             onChange={handleChoice}
           />
+        )}
+
+        {/* Severidade da não conformidade — só para item Inconforme */}
+        {item.type === 'CONFORMITY' && item.answer === 'Inconforme' && (
+          <View>
+            <AppText style={styles.severityLabel}>
+              Severidade da não conformidade:
+            </AppText>
+            <View style={styles.severityGroup}>
+              {(['Baixa', 'Média', 'Alta', 'Crítica'] as Severity[]).map(
+                (sev) => {
+                  const sel = item.ncSeverity === sev;
+                  return (
+                    <TouchableOpacity
+                      key={sev}
+                      style={[
+                        styles.severityChip,
+                        sel && styles.severityChipSelected,
+                      ]}
+                      onPress={() => handleSeverity(sev)}
+                      activeOpacity={0.75}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: sel }}
+                    >
+                      <AppText
+                        style={[
+                          styles.severityChipText,
+                          sel && styles.severityChipTextSelected,
+                        ]}
+                      >
+                        {sev}
+                      </AppText>
+                    </TouchableOpacity>
+                  );
+                },
+              )}
+            </View>
+          </View>
         )}
 
         {/* PHOTO sozinho, mas qualquer tipo pode ter evidência extra */}
@@ -1117,6 +1185,40 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
     color: '#555',
     marginBottom: -8,
+  },
+
+  // Severidade da não conformidade
+  severityLabel: {
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#555',
+    marginBottom: 10,
+  },
+  severityGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  severityChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#D0D0D0',
+    backgroundColor: '#FFFFFF',
+  },
+  severityChipSelected: {
+    borderColor: '#E53935',
+    backgroundColor: '#FFEBEE',
+  },
+  severityChipText: {
+    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    color: '#132539',
+  },
+  severityChipTextSelected: {
+    color: '#B71C1C',
+    fontFamily: 'Inter_700Bold',
   },
 
   // Observação
