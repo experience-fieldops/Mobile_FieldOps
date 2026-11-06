@@ -11,6 +11,7 @@ import {
   BackendInspectionStatus,
   BackendResponseType,
   InspectionItemSnapshotResponse,
+  ChecklistResponseRequest,
 } from '../types/inspectionApi';
 import {
   Inspection,
@@ -18,6 +19,7 @@ import {
   Priority,
   ChecklistItem,
   ChecklistItemType,
+  ChecklistAnswer,
 } from './inspections';
 
 // ─────────────────────────────────────────────────────────────
@@ -42,7 +44,7 @@ export function formatDateBR(iso: string | null | undefined): string {
 export function isOverdue(
   scheduledDate: string,
   status: BackendInspectionStatus,
-  now: Date = new Date()
+  now: Date = new Date(),
 ): boolean {
   const closed: BackendInspectionStatus[] = [
     'COMPLETED',
@@ -92,6 +94,7 @@ export function mapStatus(status: BackendInspectionStatus): InspectionStatus {
  * TODO(D-06): backend não expõe prioridade. Enquanto não houver origem
  * definida, retorna 'Média' como padrão neutro.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function derivePriority(_inspection: BackendInspection): Priority {
   return 'Média';
 }
@@ -102,7 +105,7 @@ export function derivePriority(_inspection: BackendInspection): Priority {
 
 export function mapInspection(
   dto: BackendInspection,
-  now: Date = new Date()
+  now: Date = new Date(),
 ): Inspection {
   const overdue = isOverdue(dto.scheduledDate, dto.status, now);
   return {
@@ -127,7 +130,7 @@ export function mapInspection(
 
 export function mapInspections(
   dtos: BackendInspection[],
-  now: Date = new Date()
+  now: Date = new Date(),
 ): Inspection[] {
   return dtos.map((d) => mapInspection(d, now));
 }
@@ -178,7 +181,7 @@ function parseChoices(optionsJson: string | null): string[] {
  * pronto para a tela de execução preencher. `order` usa itemDisplayOrder.
  */
 export function mapSnapshotToChecklistItem(
-  snap: InspectionItemSnapshotResponse
+  snap: InspectionItemSnapshotResponse,
 ): ChecklistItem {
   const uiType = mapResponseType(snap.responseType);
   const base = {
@@ -215,12 +218,86 @@ export function mapSnapshotToChecklistItem(
 }
 
 export function mapSnapshotsToChecklist(
-  snaps: InspectionItemSnapshotResponse[]
+  snaps: InspectionItemSnapshotResponse[],
 ): ChecklistItem[] {
   return [...snaps]
-    .sort((a, b) =>
-      a.sectionDisplayOrder - b.sectionDisplayOrder ||
-      a.itemDisplayOrder - b.itemDisplayOrder
+    .sort(
+      (a, b) =>
+        a.sectionDisplayOrder - b.sectionDisplayOrder ||
+        a.itemDisplayOrder - b.itemDisplayOrder,
     )
     .map(mapSnapshotToChecklistItem);
+}
+
+// ─────────────────────────────────────────────────────────────
+// Resposta de checklist: ChecklistItem (UI) → request do backend
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Converte a resposta de conformidade (rótulo PT) no `value` enviado ao
+ * backend.
+ *
+ * TODO(D-07): o backend aceita `value` como string livre, sem enum
+ * canônico. Por ora enviamos o próprio rótulo PT. Quando o backend
+ * definir o enum oficial, trocar este mapa. Ver BACKEND_MELHORIAS.md.
+ */
+export function conformityToValue(answer: ChecklistAnswer): string | undefined {
+  return answer ?? undefined;
+}
+
+/**
+ * Extrai o `value` (string) de qualquer item do checklist, conforme o
+ * tipo de input da UI.
+ */
+export function checklistItemValue(item: ChecklistItem): string | undefined {
+  switch (item.type) {
+    case 'CONFORMITY':
+      return conformityToValue(item.answer);
+    case 'TEXT':
+      return item.textAnswer || undefined;
+    case 'NUMBER':
+      return item.numberAnswer || undefined;
+    case 'BOOLEAN':
+      return item.booleanAnswer == null
+        ? undefined
+        : String(item.booleanAnswer);
+    case 'CHOICE':
+      return item.choiceAnswer || undefined;
+    case 'DATE':
+      return item.dateAnswer || undefined;
+    case 'PHOTO':
+      // Fotos vão como evidência (M5), não como value.
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Monta o corpo da requisição de resposta de um item.
+ * Requer o `snapshotItemId` (vindo do backend via itemSnapshots).
+ * GPS e respondedAt são opcionais e preenchidos pelo chamador.
+ */
+export function toChecklistResponseRequest(
+  item: ChecklistItem,
+  options?: {
+    gpsLatitude?: number;
+    gpsLongitude?: number;
+    respondedAt?: string;
+  },
+): ChecklistResponseRequest {
+  if (item.id == null) {
+    throw new Error(
+      'Item sem snapshotItemId: não é possível enviar a resposta ao backend.',
+    );
+  }
+  return {
+    snapshotItemId: item.id,
+    value: checklistItemValue(item),
+    observation: item.observation || undefined,
+    notApplicable: false,
+    gpsLatitude: options?.gpsLatitude,
+    gpsLongitude: options?.gpsLongitude,
+    respondedAt: options?.respondedAt,
+  };
 }
