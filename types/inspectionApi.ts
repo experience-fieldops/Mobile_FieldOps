@@ -1,4 +1,3 @@
-
 /**
  * Tipos utilizados pela API de inspeções do Spring Boot.
  *
@@ -107,4 +106,21 @@ export interface BackendInspection {
    * (ausentes na listagem paginada).
    */
   itemSnapshots?: InspectionItemSnapshotResponse[] | null;
+}
+
+/**
+ * Progresso de preenchimento do checklist de uma inspeção.
+ *
+ * Origem: Backend - InspectionProgressResponse.java
+ * GET /api/v1/inspections/{inspectionId}/responses/progress
+ */
+export interface InspectionProgressResponse {
+  inspectionId: number;
+  totalItems: number;
+  answeredItems: number;
+  notApplicableItems: number;
+  applicableItems: number;
+  pendingItems: number;
+  /** Percentual 0–100 (double). */
+  progressPercentage: number;
 }

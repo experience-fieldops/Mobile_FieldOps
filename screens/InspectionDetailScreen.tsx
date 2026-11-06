@@ -5,12 +5,31 @@ import {
   StyleSheet,
   StatusBar,
 } from 'react-native';
-import { ArrowLeft, MapPin, Wrench, Calendar } from 'lucide-react-native';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { useState, useCallback } from 'react';
+import { ActivityIndicator } from 'react-native';
+import {
+  ArrowLeft,
+  MapPin,
+  Wrench,
+  Calendar,
+  AlertCircle,
+} from 'lucide-react-native';
+import {
+  useNavigation,
+  useRoute,
+  useFocusEffect,
+  RouteProp,
+} from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import AppText from '../components/AppText';
-import { MOCK_INSPECTIONS, Priority } from '../data/inspections';
+import { Inspection, Priority } from '../data/inspections';
+import { mapInspection } from '../data/mappers';
+import {
+  getInspectionById,
+  getInspectionProgress,
+} from '../services/inspectionService';
+import { useAuth } from '../context/AuthContext';
 import { RootStackParamList } from '../navigation/AppNavigator';
 
 type DetailRouteProp = RouteProp<RootStackParamList, 'InspectionDetail'>;
@@ -35,15 +54,68 @@ export default function InspectionDetailScreen() {
   // useRoute lê os parâmetros passados pela tela anterior (inspectionId)
   const route = useRoute<DetailRouteProp>();
   const { inspectionId } = route.params;
+  const { token } = useAuth();
 
-  // Busca a inspeção pelo id recebido
-  const inspection = MOCK_INSPECTIONS.find((i) => i.id === inspectionId);
+  const [inspection, setInspection] = useState<Inspection | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Segurança: se por algum motivo o id não existir, mostra mensagem
-  if (!inspection) {
+  // Busca detalhe + progresso real do backend.
+  const load = useCallback(async () => {
+    if (!token) {
+      setError('Sessão inválida. Faça login novamente.');
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const dto = await getInspectionById(token, inspectionId);
+      const mapped = mapInspection(dto);
+
+      // Progresso vem de endpoint dedicado; se falhar, mantém 0 (não crítico).
+      try {
+        const progress = await getInspectionProgress(token, inspectionId);
+        mapped.progress = Math.round(progress.progressPercentage);
+      } catch {
+        // progresso indisponível — segue com o detalhe
+      }
+
+      setInspection(mapped);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Erro ao carregar a inspeção.';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  }, [token, inspectionId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
+  );
+
+  // Carregando
+  if (loading) {
     return (
       <View style={styles.notFound}>
-        <AppText style={styles.notFoundText}>Inspeção não encontrada.</AppText>
+        <ActivityIndicator size="large" color="#132539" />
+      </View>
+    );
+  }
+
+  // Erro ou não encontrada
+  if (error || !inspection) {
+    return (
+      <View style={styles.notFound}>
+        <AlertCircle size={44} color="#E53935" />
+        <AppText style={styles.notFoundText}>
+          {error ?? 'Inspeção não encontrada.'}
+        </AppText>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <AppText style={styles.backLink}>Voltar</AppText>
         </TouchableOpacity>
@@ -98,7 +170,9 @@ export default function InspectionDetailScreen() {
           <AppText style={styles.sectionTitle}>Progresso</AppText>
           <View style={styles.progressRow}>
             <ProgressBar progress={inspection.progress} />
-            <AppText style={styles.progressLabel}>{inspection.progress}%</AppText>
+            <AppText style={styles.progressLabel}>
+              {inspection.progress}%
+            </AppText>
           </View>
         </View>
 
@@ -186,11 +260,21 @@ const styles = StyleSheet.create({
   },
 
   // Identification
-  codeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  codeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
   badge: { borderRadius: 6, paddingHorizontal: 10, paddingVertical: 3 },
   badgeText: { color: '#FFFFFF', fontSize: 12, fontFamily: 'Inter_700Bold' },
   code: { fontSize: 13, color: '#555', fontFamily: 'Inter_400Regular' },
-  title: { fontSize: 18, fontFamily: 'Inter_700Bold', color: '#132539', marginBottom: 12 },
+  title: {
+    fontSize: 18,
+    fontFamily: 'Inter_700Bold',
+    color: '#132539',
+    marginBottom: 12,
+  },
   statusRow: { flexDirection: 'row' },
   statusChip: {
     backgroundColor: '#E8F5E9',
@@ -227,15 +311,30 @@ const styles = StyleSheet.create({
   },
 
   // Info rows
-  infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 4 },
+  infoRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingVertical: 4,
+  },
   infoTextGroup: { flex: 1 },
   infoLabel: { fontSize: 11, color: '#999', fontFamily: 'Inter_400Regular' },
-  infoValue: { fontSize: 14, color: '#132539', fontFamily: 'Inter_700Bold', marginTop: 2 },
+  infoValue: {
+    fontSize: 14,
+    color: '#132539',
+    fontFamily: 'Inter_700Bold',
+    marginTop: 2,
+  },
   overdueText: { color: '#E53935' },
   divider: { height: 1, backgroundColor: '#F0F0F0', marginVertical: 8 },
 
   // Not found
-  notFound: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+  notFound: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
   notFoundText: { fontSize: 15, color: '#555' },
   backLink: { fontSize: 14, color: '#1E88E5', fontFamily: 'Inter_700Bold' },
 });
