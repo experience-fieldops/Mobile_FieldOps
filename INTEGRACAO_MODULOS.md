@@ -221,7 +221,7 @@ Regra de ouro: **M0 e M1 vêm primeiro**. Eles desbloqueiam todo o resto e não 
 
 ---
 
-## M7 — Sincronização offline  `[~]` (parcial — opção pragmática)
+## M7 — Sincronização offline  `[x]` (fila offline implementada depois — ver DECISOES_INTEGRACAO.md, "Execução offline")
 
 > **Status (entregue):** download real (`pending-sync`) + seções
 > "enviadas/aprovadas" derivadas do status das inspeções. A **fila de upload

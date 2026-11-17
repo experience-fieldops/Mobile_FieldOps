@@ -166,7 +166,7 @@ export default function EquipmentScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#132539" />
+      <StatusBar barStyle="light-content" />
 
       {/* ── Header ─────────────────────────────────────── */}
       <View style={styles.header}>

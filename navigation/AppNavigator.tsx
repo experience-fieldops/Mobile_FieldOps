@@ -13,6 +13,7 @@ import EquipmentScreen from '../screens/EquipmentScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import SyncScreen from '../screens/SyncScreen';
 import { useAuth } from '../context/AuthContext';
+import { useAutoSync } from '../services/network';
 
 export type RootStackParamList = {
   Login: undefined;
@@ -63,7 +64,10 @@ function MainTabs() {
 }
 
 export default function AppNavigator() {
-  const { user, loading } = useAuth();
+  const { user, token, loading } = useAuth();
+
+  // Envia a fila de sincronização offline quando houver conexão.
+  useAutoSync(token, user?.id ?? null);
 
   // Aguarda restaurar sessão do AsyncStorage antes de montar a navegação
   if (loading) return null;
@@ -90,7 +94,10 @@ export default function AppNavigator() {
               component={InspectionFormScreen}
             />
             <Stack.Screen name="QRScanner" component={QRScannerScreen} />
-            <Stack.Screen name="ChecklistExecution" component={ChecklistExecutionScreen} />
+            <Stack.Screen
+              name="ChecklistExecution"
+              component={ChecklistExecutionScreen}
+            />
           </>
         ) : (
           <Stack.Screen name="Login" component={LoginScreen} />

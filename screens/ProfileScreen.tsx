@@ -155,7 +155,7 @@ export default function ProfileScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#132539" />
+      <StatusBar barStyle="light-content" />
 
       {/* ── Header ─────────────────────────────────────── */}
       <View style={styles.header}>
@@ -299,7 +299,7 @@ const styles = StyleSheet.create({
   header: {
     backgroundColor: '#132539',
     paddingHorizontal: 20,
-    paddingTop: 15,
+    paddingTop: 50,
     paddingBottom: 20,
   },
   headerTop: {

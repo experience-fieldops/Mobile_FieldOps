@@ -108,6 +108,28 @@ const vmAtrasado = mapInspection({ ...baseDto, scheduledDate: '2026-06-01' }, NO
 assert(vmAtrasado.deadlineOverdue === true, 'mapInspection: deadlineOverdue quando vencida');
 assert(vmAtrasado.status === 'Atrasada', 'mapInspection: status "Atrasada" tem precedência (D-14)');
 
+// ── iniciada e não finalizada, com prazo vencido ─────────────
+const vmAndamentoVencida = mapInspection(
+  { ...baseDto, status: 'IN_PROGRESS', scheduledDate: '2026-06-01' },
+  NOW,
+);
+assert(
+  vmAndamentoVencida.status === 'Em Andamento',
+  'mapInspection: iniciada e não finalizada fica em "Em Andamento" mesmo vencida',
+);
+assert(
+  vmAndamentoVencida.deadlineOverdue === true,
+  'mapInspection: prazo vencido segue destacado na inspeção em andamento',
+);
+const vmConcluida = mapInspection(
+  { ...baseDto, status: 'COMPLETED', scheduledDate: '2026-06-01' },
+  NOW,
+);
+assert(
+  vmConcluida.status === 'Concluída',
+  'mapInspection: finalizada sai de "Em Andamento"',
+);
+
 // ── equipamento nulo ─────────────────────────────────────────
 const vmSemEquip = mapInspection({ ...baseDto, equipmentId: null, equipmentName: null }, NOW);
 assert(vmSemEquip.equipment === '—', 'mapInspection: equipment ausente → —');

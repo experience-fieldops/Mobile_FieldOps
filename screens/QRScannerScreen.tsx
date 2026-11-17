@@ -43,7 +43,7 @@ export default function QRScannerScreen() {
   if (!permission.granted) {
     return (
       <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#132539" />
+        <StatusBar barStyle="light-content" />
         <View style={styles.header}>
           <TouchableOpacity
             style={styles.backButton}
@@ -122,7 +122,7 @@ export default function QRScannerScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#132539" />
+      <StatusBar barStyle="light-content" />
 
       {/* ── Header ───────────────────────────────────────── */}
       <View style={styles.header}>

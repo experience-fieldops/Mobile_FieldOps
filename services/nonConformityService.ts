@@ -8,8 +8,12 @@ import {
 /**
  * Serviço de não conformidades.
  *
- * POST /api/v1/inspections/{id}/non-conformities — cria uma NC vinculada
- * (opcionalmente) a um item do checklist via snapshotItemId.
+ * POST /api/v1/inspections/{id}/non-conformities
+ * Cria uma NC vinculada à inspeção e, opcionalmente, a um item do checklist
+ * via `snapshotItemId`. Campos obrigatórios no backend: `title` e `severity`.
+ *
+ * Autenticação e tratamento de erros HTTP (401/403/demais status) ficam no
+ * cliente único `apiRequest`; erros são propagados para a tela tratar.
  */
 export async function createNonConformity(
   token: string,

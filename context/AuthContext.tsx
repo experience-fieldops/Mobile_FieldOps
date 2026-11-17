@@ -90,7 +90,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Login pelo backend
   const login = useCallback(
     async (email: string, password: string, persist: boolean) => {
+      const authStart = Date.now();
       const response = await authenticate(email, password);
+
+      if (__DEV__) {
+        console.log('[Auth] Resposta do login recebida:', {
+          durationMs: Date.now() - authStart,
+        });
+      }
 
       console.log('JWT recebido:', {
         possuiToken: Boolean(response.token),
@@ -122,15 +129,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
 
       if (isNative) {
+        const storeStart = Date.now();
         if (persist) {
           await SecureStore.setItemAsync(SESSION_KEY, JSON.stringify(session));
         } else {
           await SecureStore.deleteItemAsync(SESSION_KEY);
         }
+        if (__DEV__) {
+          console.log('[Auth] SecureStore concluído:', {
+            operacao: persist ? 'gravar sessão' : 'limpar sessão',
+            durationMs: Date.now() - storeStart,
+          });
+        }
       }
 
       setUser(authenticatedUser);
       setToken(response.token);
+
+      if (__DEV__) {
+        console.log('[Auth] Estado de autenticação atualizado.');
+      }
     },
     [],
   );

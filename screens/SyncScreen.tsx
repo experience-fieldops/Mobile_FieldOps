@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   View,
   ScrollView,
@@ -22,10 +22,18 @@ import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 
 import AppText from '../components/AppText';
 import { MainTabParamList } from '../navigation/AppNavigator';
-import { getPendingSync } from '../services/syncService';
 import { getAssignedInspections } from '../services/inspectionService';
+import { isNetworkError } from '../services/api';
+import { getQueue, subscribeQueue, syncQueue } from '../services/syncQueue';
+import { useIsOnline } from '../services/network';
 import { formatDateBR } from '../data/mappers';
 import { useAuth } from '../context/AuthContext';
+
+/** yyyy-MM-ddTHH:mm:ss (local) → dd/mm/aaaa HH:mm */
+function formatLocalDateTime(value: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value);
+  return m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}` : value;
+}
 
 type SyncNavProp = BottomTabNavigationProp<MainTabParamList, 'Sincronizar'>;
 
@@ -38,6 +46,8 @@ interface SyncItem {
   code: string;
   title: string;
   sentAt?: string; // presente em 'sent' e 'approved'
+  savedAt?: string; // fila: quando foi finalizada no aparelho
+  error?: string; // fila: motivo da última falha de envio
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -50,9 +60,25 @@ function PendingCard({ item }: { item: SyncItem }) {
       <View style={styles.cardRow}>
         <View style={styles.cardInfo}>
           <AppText style={styles.cardTitle}>{item.title}</AppText>
-          <AppText style={styles.cardCode}>{item.code}</AppText>
+          <AppText style={styles.cardCode}>
+            {item.code}
+            {item.savedAt ? (
+              <AppText style={styles.cardSentDate}>
+                {'   '}Finalizada em: {item.savedAt}
+              </AppText>
+            ) : null}
+          </AppText>
+          {item.error ? (
+            <AppText style={styles.cardError}>
+              Falha no envio: {item.error}
+            </AppText>
+          ) : null}
         </View>
-        <UploadCloud size={24} color="#E65100" />
+        {item.error ? (
+          <AlertCircle size={24} color="#E53935" />
+        ) : (
+          <UploadCloud size={24} color="#E65100" />
+        )}
       </View>
     </View>
   );
@@ -125,12 +151,42 @@ export default function SyncScreen() {
   const navigation = useNavigation<SyncNavProp>();
   const { user, token } = useAuth();
 
+  const isOnline = useIsOnline();
+
   const [pending, setPending] = useState<SyncItem[]>([]);
   const [sent, setSent] = useState<SyncItem[]>([]);
   const [approved, setApproved] = useState<SyncItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Backend inalcançável na última carga (enviadas/aprovadas indisponíveis).
+  const [backendOffline, setBackendOffline] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  // Fila local: inspeções finalizadas no aparelho aguardando envio.
+  const loadQueue = useCallback(async () => {
+    if (user == null) return;
+    const queue = await getQueue(user.id);
+    setPending(
+      queue.map((q) => ({
+        id: String(q.inspectionId),
+        code: q.code,
+        title: q.title,
+        savedAt: formatLocalDateTime(q.completedAt),
+        error: q.status === 'error' ? q.lastError : undefined,
+      })),
+    );
+  }, [user]);
+
+  // Atualiza a fila quando ela muda (ex.: envio automático concluído).
+  useEffect(
+    () =>
+      subscribeQueue(() => {
+        loadQueue();
+      }),
+    [loadQueue],
+  );
 
   const load = useCallback(
     async (mode: 'initial' | 'refresh' = 'initial') => {
@@ -144,17 +200,10 @@ export default function SyncScreen() {
       else setLoading(true);
       setError(null);
 
-      try {
-        // Fila para sincronização: ordens disponíveis p/ trabalho offline.
-        const pendingOrders = await getPendingSync(token, user.id);
-        setPending(
-          pendingOrders.map((o) => ({
-            id: String(o.id),
-            code: `INSP-${o.id}`,
-            title: o.templateTitle,
-          })),
-        );
+      // A fila é local: aparece mesmo sem internet.
+      await loadQueue();
 
+      try {
         // Enviadas / aprovadas: derivadas do status das inspeções do técnico.
         const page = await getAssignedInspections(token, user.id, 0, 100);
         const sentItems: SyncItem[] = [];
@@ -174,19 +223,54 @@ export default function SyncScreen() {
         }
         setSent(sentItems);
         setApproved(approvedItems);
+        setBackendOffline(false);
       } catch (err) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : 'Erro ao carregar sincronização.';
-        setError(message);
+        if (isNetworkError(err)) {
+          // Sem conexão: a fila continua visível; só enviadas/aprovadas
+          // ficam indisponíveis.
+          setBackendOffline(true);
+        } else {
+          const message =
+            err instanceof Error
+              ? err.message
+              : 'Erro ao carregar sincronização.';
+          setError(message);
+        }
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [token, user],
+    [token, user, loadQueue],
   );
+
+  // Envio manual da fila (inclui as que falharam antes).
+  async function handleSyncNow() {
+    if (!token || user == null) return;
+    setSyncing(true);
+    setSyncMessage(null);
+    try {
+      const summary = await syncQueue(token, user.id, { includeErrors: true });
+      if (summary.offline) {
+        setSyncMessage(
+          'Sem conexão com o servidor. A fila será enviada quando houver ' +
+            'internet.',
+        );
+      } else if (summary.failed > 0) {
+        setSyncMessage(
+          `${summary.synced} enviada(s), ${summary.failed} com falha. ` +
+            'Veja o motivo em cada item.',
+        );
+      } else {
+        setSyncMessage(`${summary.synced} inspeção(ões) enviada(s).`);
+      }
+    } finally {
+      setSyncing(false);
+      load('refresh');
+    }
+  }
+
+  const showOffline = isOnline === false || backendOffline;
 
   useFocusEffect(
     useCallback(() => {
@@ -196,7 +280,7 @@ export default function SyncScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#132539" />
+      <StatusBar barStyle="light-content" />
 
       {/* ── Header ─────────────────────────────────────── */}
       <View style={styles.header}>
@@ -204,18 +288,22 @@ export default function SyncScreen() {
           <AppText style={styles.headerBrandField}>FIELD </AppText>
           <AppText style={styles.headerBrandOps}>OPS</AppText>
         </AppText>
-        <View style={styles.offlineContainer}>
-          <AppText style={styles.offlineText}>Modo Offline</AppText>
-          <WifiOff size={18} color="#E53935" style={styles.offlineIcon} />
-        </View>
+        {showOffline ? (
+          <View style={styles.offlineContainer}>
+            <AppText style={styles.offlineText}>Modo Offline</AppText>
+            <WifiOff size={18} color="#E53935" style={styles.offlineIcon} />
+          </View>
+        ) : null}
       </View>
 
       {/* ── Título + Subtítulo ──────────────────────────── */}
       <View style={styles.titleSection}>
         <AppText style={styles.screenTitle}>Sincronização</AppText>
         <AppText style={styles.screenSubtitle}>
-          Sem conexão - conecte-se a internet para realizar a sincronização dos
-          arquivos
+          {showOffline
+            ? 'Sem conexão - as inspeções finalizadas ficam na fila e são ' +
+              'enviadas quando a internet voltar'
+            : 'Conectado - a fila é enviada automaticamente'}
         </AppText>
       </View>
 
@@ -249,19 +337,41 @@ export default function SyncScreen() {
             />
           }
         >
-          {/* Fila para sincronização */}
+          {/* Fila para sincronização (local, no aparelho) */}
           <SectionBlock
             title="Fila para sincronização"
-            subtitle="Ordens disponíveis para execução offline"
+            subtitle="Inspeções finalizadas no aparelho aguardando envio"
             backgroundColor="#FFF8E1"
           >
             {pending.length === 0 ? (
               <AppText style={styles.emptySection}>
-                Nenhuma ordem pendente.
+                Nenhuma inspeção aguardando envio.
               </AppText>
             ) : (
-              pending.map((item) => <PendingCard key={item.id} item={item} />)
+              <>
+                {pending.map((item) => (
+                  <PendingCard key={item.id} item={item} />
+                ))}
+                <TouchableOpacity
+                  style={[styles.syncBtn, syncing && styles.syncBtnDisabled]}
+                  onPress={handleSyncNow}
+                  disabled={syncing}
+                  activeOpacity={0.7}
+                  accessibilityLabel="Sincronizar agora"
+                >
+                  {syncing ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <AppText style={styles.syncBtnText}>
+                      Sincronizar agora
+                    </AppText>
+                  )}
+                </TouchableOpacity>
+              </>
             )}
+            {syncMessage ? (
+              <AppText style={styles.syncMessage}>{syncMessage}</AppText>
+            ) : null}
           </SectionBlock>
 
           {/* Enviadas */}
@@ -270,7 +380,11 @@ export default function SyncScreen() {
             subtitle="Inspeções enviadas aguardando validação"
             backgroundColor="#EDE7F6"
           >
-            {sent.length === 0 ? (
+            {backendOffline ? (
+              <AppText style={styles.emptySection}>
+                Sem conexão. Disponível quando houver internet.
+              </AppText>
+            ) : sent.length === 0 ? (
               <AppText style={styles.emptySection}>
                 Nenhuma inspeção enviada.
               </AppText>
@@ -287,7 +401,11 @@ export default function SyncScreen() {
             subtitle="Inspeções sincronizadas e validadas"
             backgroundColor="#E8F5E9"
           >
-            {approved.length === 0 ? (
+            {backendOffline ? (
+              <AppText style={styles.emptySection}>
+                Sem conexão. Disponível quando houver internet.
+              </AppText>
+            ) : approved.length === 0 ? (
               <AppText style={styles.emptySection}>
                 Nenhuma inspeção aprovada.
               </AppText>
@@ -341,7 +459,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 15,
+    paddingTop: 50,
     paddingBottom: 25,
   },
   headerBrand: {},
@@ -471,6 +589,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontFamily: 'Inter_400Regular',
     color: '#888',
+  },
+  cardError: {
+    fontSize: 12,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#E53935',
+    marginTop: 4,
+  },
+
+  // Sincronizar agora
+  syncBtn: {
+    marginTop: 4,
+    backgroundColor: '#132539',
+    borderRadius: 6,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  syncBtnDisabled: { opacity: 0.6 },
+  syncBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontFamily: 'Inter_700Bold',
+  },
+  syncMessage: {
+    fontSize: 12,
+    fontFamily: 'Inter_400Regular',
+    color: '#555',
+    marginTop: 8,
   },
 
   // Tab Bar

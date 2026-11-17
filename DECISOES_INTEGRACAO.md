@@ -112,6 +112,132 @@
 
 ---
 
+## Ajustes pós-upgrade para Expo SDK 58 / React Native 0.88
+
+O `package.json` passou de Expo 57 / RN 0.86 para **Expo 58 / RN 0.88.1**
+(`react` 19.3, `@types/react` 19.3). Isso quebrou tipos e o bundle em três
+pontos, corrigidos assim:
+
+- **`StatusBar` sem `backgroundColor`.** A prop foi removida dos 9 `<StatusBar>`
+  (8 telas; `QRScannerScreen` tem 2). No RN 0.88 o tipo do `StatusBar` só aceita
+  `barStyle`, `hidden`, `animated` e `showHideTransition`: a barra do Android é
+  edge-to-edge e a cor não é mais controlada por prop. A cor do topo vem do
+  `backgroundColor: '#132539'` do próprio header de cada tela.
+  - **Em aberto:** os headers usam `paddingTop: 15` fixo, então no Android o
+    conteúdo pode ficar sob a barra de status. Solução prevista: aplicar os
+    insets de `react-native-safe-area-context` (já instalado). Não verificado
+    em device.
+- **Ref do `ScrollView` (`ChecklistExecutionScreen`).** `useRef<ScrollView>`
+  virou `useRef<ScrollViewInstance>` (tipo exportado por `react-native`). Nos
+  tipos do RN 0.88 o `ScrollView` é um componente de função, então
+  `scrollTo` não existe no tipo do componente, só na instância.
+- **`services/nonConformityService.ts` restaurado.** O arquivo versionado estava
+  deletado no working tree e o Metro falhava com `Unable to resolve module
+  ../services/nonConformityService`. Conteúdo igual ao versionado (só o
+  comentário foi ampliado). Endpoint:
+  `POST /api/v1/inspections/{id}/non-conformities`.
+- **Verificação:** `tsc --noEmit` e `eslint` sem erros; `expo export --platform
+  android` conclui (bundle sem módulos não resolvidos); `expo install --check`
+  sem divergência de versões. Não houve execução em device/Expo Go.
+
+### Para rodar no Expo Go
+
+- **`EXPO_PUBLIC_API_URL` no `.env.local` não pode ser `localhost`.** No
+  celular, `localhost` é o próprio celular. Use o IP da máquina na mesma rede
+  Wi-Fi do aparelho (ex.: `http://<IP-da-maquina>:8080`) e reinicie o Metro com
+  `npx expo start -c`, pois variáveis `EXPO_PUBLIC_*` são lidas na inicialização.
+- O backend precisa aceitar conexões de outros dispositivos (porta 8080
+  liberada no firewall do Windows). Responder no IP local da própria máquina não
+  prova que o celular alcança.
+- O Expo Go instalado no aparelho precisa suportar o SDK 58.
+
+---
+
+## Correções do fluxo "Iniciar" / "Finalizar" (teste em device e web)
+
+- **409 ao iniciar.** O backend recusa nova execução se a inspeção não estiver
+  `SCHEDULED`/`IN_PROGRESS` ou se já houver execução `IN_PROGRESS`. A tela
+  criava uma execução nova a cada abertura. Agora: consulta
+  `GET /inspections/{id}/executions` e **retoma** a execução em andamento do
+  mesmo técnico (o `saveResponse` do backend é upsert); para status não
+  executáveis mostra mensagem clara em vez do 409.
+- **Erro ao finalizar (404 no upload).** O app enviava o id do
+  `ChecklistResponse` como `responseId` do upload, mas o backend espera um id
+  de `InspectionResponse`. Agora a foto sobe **sem `responseId`** (vinculada à
+  inspeção e à NC). Ver B-12.
+- **Upload no web.** No navegador o `FormData` não aceita `{ uri, name, type }`;
+  o serviço converte a imagem em `Blob` quando `Platform.OS === 'web'`.
+- **Mensagens de erro.** `services/api.ts` passa a anexar o `message` que o
+  backend devolve no corpo do erro ("Motivo: …"), exceto em 401 e 5xx.
+- **400 ao finalizar (formato do `value`).** O backend (commit `a54749e`)
+  passou a validar o valor de cada resposta (`ResponseValueValidator`). O app
+  agora converte em `data/mappers.ts`: conformidade → enum `ConformityValue`
+  (Conforme→CONFORMING, Atenção→ATTENTION, Inconforme→NON_CONFORMING,
+  Não verificado→NOT_VERIFIED); data dd/mm/aaaa → yyyy-MM-dd; número com
+  vírgula → ponto. Resolve B-01 e B-09.
+- **Ordem do envio.** O "Finalizar" grava todas as respostas primeiro (upsert,
+  seguro de repetir) e só depois cria NCs e sobe fotos. Antes, uma resposta
+  recusada no meio deixava fotos já enviadas, que duplicavam a cada nova
+  tentativa.
+
+---
+
+## Execução offline e fila de sincronização (B-11)
+
+**Requisito.** Sem internet, o técnico abre e executa uma inspeção já
+atribuída a ele, finaliza, e ela fica na "Fila para sincronização". Quando a
+internet volta, a fila é enviada ao backend.
+
+**Decisão: opção (B) — a fila reenvia o fluxo online.** A fila não usa
+`POST /api/v1/sync`: esse endpoint grava respostas em `InspectionResponse` e
+inicia pela regra de `InspectionService.start` (sem execução/GPS), enquanto o
+app online grava em `ChecklistResponse` via execução. Reenviar as mesmas
+chamadas do fluxo online mantém todos os dados no mesmo modelo.
+
+**Como funciona.**
+- `services/offlineStore.ts`: com internet, a lista de inspeções e o detalhe
+  (com os itens do checklist) das que podem ser executadas são salvos no
+  aparelho (AsyncStorage, por usuário).
+- `services/api.ts`: falha de rede e timeout são marcados (`isNetworkError`);
+  é isso que decide o modo offline (ter Wi-Fi não garante alcançar o backend).
+- `ChecklistExecutionScreen`: sem conexão, abre a cópia salva e mostra aviso.
+  Ao finalizar, a inspeção sempre entra na fila; com conexão é enviada na hora.
+- `services/syncQueue.ts`: envia execução → respostas → NCs → fotos →
+  conclusão, gravando o progresso de cada etapa. Envio interrompido continua
+  de onde parou sem duplicar NC nem foto. Queda de rede = continua pendente;
+  recusa do servidor = fica com o motivo, visível na tela de Sincronização.
+- `services/network.ts` (`@react-native-community/netinfo` 12.0.1): envio
+  automático ao abrir o app e sempre que a conexão volta.
+- `SyncScreen`: "Fila para sincronização" agora é a fila local (com motivo da
+  falha e botão "Sincronizar agora"). "Modo Offline" só aparece sem conexão.
+- `InspectionsScreen`: sem conexão, mostra a lista salva; inspeções na fila
+  aparecem como concluídas.
+- Datas da fila vão em hora local sem fuso (`yyyy-MM-ddTHH:mm:ss`), formato que
+  o `LocalDateTime.parse` do backend aceita; `toISOString()` (com `Z`) era
+  ignorado e virava a hora do servidor.
+
+**Limitações conhecidas.**
+- Só abre offline o que foi baixado antes: a lista precisa ter sido carregada
+  com internet depois da atribuição.
+- Login exige internet. Para abrir o app offline no celular, a sessão precisa
+  estar salva ("Lembrar-me"). No web a sessão não é persistida.
+- O token expira; se expirar durante o período offline, o envio pede novo login.
+- Fotos no celular ficam no endereço do image-picker (cache do app); se o
+  sistema limpar o cache antes do envio, a foto se perde. No web são
+  convertidas em data URL (limite de ~5 MB do localStorage).
+- GPS de início: se não houver posição ao abrir offline, usa a do fim; sem
+  nenhuma, o envio falha com motivo claro.
+- Se o técnico mudar um item de Inconforme para outro valor após a NC já ter
+  sido enviada, a NC não é desfeita.
+
+**Verificação.** `tsc` e `eslint` sem erros; bundles web e Android exportados;
+20 cenários da fila testados contra backend simulado (queda de rede e
+retomada sem duplicar, recusa 400 com motivo, envio automático x manual,
+reaproveitamento de execução, execução de outro técnico). Não testado em
+device sem internet.
+
+---
+
 ## Itens em aberto que dependem do backend
 
 | Ref | Assunto | Onde está |

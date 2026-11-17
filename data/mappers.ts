@@ -120,7 +120,15 @@ export function mapInspection(
     progress: 0,
     deadline: formatDateBR(dto.scheduledDate),
     deadlineOverdue: overdue,
-    status: overdue ? 'Atrasada' : mapStatus(dto.status),
+    // Iniciada e ainda não finalizada fica sempre em "Em Andamento", mesmo
+    // com prazo vencido (o prazo segue destacado via deadlineOverdue).
+    // "Atrasada" vale para as não iniciadas com prazo vencido.
+    status:
+      dto.status === 'IN_PROGRESS'
+        ? 'Em Andamento'
+        : overdue
+          ? 'Atrasada'
+          : mapStatus(dto.status),
     assignee: dto.assignedToName,
     equipment: dto.equipmentName ?? '—',
     // TODO(D-06): backend não expõe tempo estimado.
@@ -236,15 +244,63 @@ export function mapSnapshotsToChecklist(
 // ─────────────────────────────────────────────────────────────
 
 /**
- * Converte a resposta de conformidade (rótulo PT) no `value` enviado ao
- * backend.
- *
- * TODO(D-07): o backend aceita `value` como string livre, sem enum
- * canônico. Por ora enviamos o próprio rótulo PT. Quando o backend
- * definir o enum oficial, trocar este mapa. Ver BACKEND_MELHORIAS.md.
+ * Rótulo de conformidade da UI → enum `ConformityValue` do backend
+ * (B-01/D-07). O backend valida o `value` de itens CONFORMITY contra
+ * esse enum e responde 400 para qualquer outro texto.
  */
+const CONFORMITY_VALUE: Record<NonNullable<ChecklistAnswer>, string> = {
+  Conforme: 'CONFORMING',
+  Atenção: 'ATTENTION',
+  Inconforme: 'NON_CONFORMING',
+  'Não verificado': 'NOT_VERIFIED',
+};
+
+/** Converte a resposta de conformidade no `value` enviado ao backend. */
 export function conformityToValue(answer: ChecklistAnswer): string | undefined {
-  return answer ?? undefined;
+  return answer ? CONFORMITY_VALUE[answer] : undefined;
+}
+
+/**
+ * Data digitada na UI (dd/mm/aaaa) → ISO yyyy-MM-dd, exigido pelo backend.
+ * Já em ISO é mantida. Retorna undefined se não for uma data completa e
+ * válida, para não enviar um valor que o backend rejeitaria com 400.
+ */
+export function dateToIso(input: string): string | undefined {
+  const text = input.trim();
+  if (!text) return undefined;
+
+  let year: number;
+  let month: number;
+  let day: number;
+
+  const br = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(text);
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+  if (br) {
+    [day, month, year] = [Number(br[1]), Number(br[2]), Number(br[3])];
+  } else if (iso) {
+    [year, month, day] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
+  } else {
+    return undefined;
+  }
+
+  // Rejeita datas inexistentes (ex.: 31/02), como o LocalDate.parse do backend.
+  const d = new Date(Date.UTC(year, month - 1, day));
+  if (
+    d.getUTCFullYear() !== year ||
+    d.getUTCMonth() !== month - 1 ||
+    d.getUTCDate() !== day
+  ) {
+    return undefined;
+  }
+
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${year}-${pad(month)}-${pad(day)}`;
+}
+
+/** Número digitado (aceita vírgula decimal) → formato com ponto do backend. */
+export function numberToBackend(input: string): string | undefined {
+  const text = input.trim().replace(',', '.');
+  return text && Number.isFinite(Number(text)) ? text : undefined;
 }
 
 /**
@@ -258,7 +314,7 @@ export function checklistItemValue(item: ChecklistItem): string | undefined {
     case 'TEXT':
       return item.textAnswer || undefined;
     case 'NUMBER':
-      return item.numberAnswer || undefined;
+      return numberToBackend(item.numberAnswer);
     case 'BOOLEAN':
       return item.booleanAnswer == null
         ? undefined
@@ -266,7 +322,7 @@ export function checklistItemValue(item: ChecklistItem): string | undefined {
     case 'CHOICE':
       return item.choiceAnswer || undefined;
     case 'DATE':
-      return item.dateAnswer || undefined;
+      return dateToIso(item.dateAnswer);
     case 'PHOTO':
       // Fotos vão como evidência (M5), não como value.
       return undefined;

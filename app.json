@@ -29,7 +29,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "O FieldOps usa sua localização para registrar onde a inspeção foi executada."
         }
-      ]
+      ],
+      "expo-status-bar"
     ]
   }
 }

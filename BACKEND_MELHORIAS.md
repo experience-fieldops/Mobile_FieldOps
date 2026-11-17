@@ -7,7 +7,7 @@
 
 | # | Severidade | Tema |
 |---|---|---|
-| B-01 | 🔴 Alta | Enum de conformidade ausente |
+| B-01 | ✅ Resolvido | Enum de conformidade ausente — backend criou `ConformityValue` (CONFORMING/ATTENTION/NON_CONFORMING/NOT_VERIFIED), commit `a54749e`; app já envia o enum |
 | B-02 | 🟠 Média | Prioridade da inspeção inexistente |
 | B-03 | 🟠 Média | Progresso/percentual já existe — confirmar semântica |
 | B-04 | 🟡 Baixa | Código amigável da inspeção |
@@ -15,9 +15,10 @@
 | B-06 | 🟡 Baixa | Organização do usuário |
 | B-07 | 🟡 Baixa | Métricas do técnico |
 | B-08 | 🟠 Média | `requestingUserId`/`technicianId` via query |
-| B-09 | 🟡 Baixa | `BOOLEAN`/`DATE` — formato do `value` |
+| B-09 | ✅ Resolvido | `BOOLEAN`/`DATE` — formato do `value`: backend valida via `ResponseValueValidator` (NUMBER com ponto, BOOLEAN true/false, DATE yyyy-MM-dd); app converte antes de enviar |
 | B-10 | 🟠 Média | Severidade da NC definida pelo cliente |
-| B-11 | 🟠 Média | Fila de upload offline não implementada no app |
+| B-11 | ✅ App | Fila offline implementada no app (reenvia o fluxo online; não usa `POST /sync`) — ver DECISOES_INTEGRACAO.md |
+| B-12 | 🟠 Média | Evidência não vincula a resposta da execução |
 
 ---
 
@@ -185,6 +186,34 @@ acionado pela UI hoje.
 
 Este é um épico próprio (mexe em módulos já entregues) e foi deliberadamente
 adiado para não misturar refatoração com a entrega do M7.
+
+---
+
+## B-12 — Evidência não vincula a resposta da execução 🟠
+
+**Problema.** `POST /api/v1/inspections/{id}/evidences?responseId=` resolve o
+`responseId` em `InspectionResponse` (`EvidenceServiceImpl.resolveResponse` →
+`findByInspectionIdAndId`). O fluxo de execução em campo, porém, grava as
+respostas em **outra tabela**, `ChecklistResponse`
+(`POST /api/v1/executions/{executionId}/responses`). O id devolvido pela
+execução não existe em `InspectionResponse` → **404** "InspectionResponse X
+não pertence à inspeção Y".
+
+**Evidência real (dev).** Execução 4 da inspeção 2 gravou `ChecklistResponse`
+id 13; os `InspectionResponse` válidos da inspeção 2 eram 1–10. O "Finalizar"
+do app parou no upload da foto do primeiro item.
+
+**Workaround atual no app.** O upload é feito **sem `responseId`** — a foto fica
+vinculada à inspeção (e à NC, quando o item é Inconforme), mas não ao item
+específico do checklist.
+
+**Sugestão.** Permitir vincular evidência a um `ChecklistResponse` (ex.:
+parâmetro `checklistResponseId` ou `executionResponseId`), ou unificar as duas
+tabelas de resposta. Hoje existem dois modelos paralelos de resposta
+(`InspectionResponse` e `ChecklistResponse`), o que também afeta B-01: só o
+fluxo `/inspections/{id}/responses` valida `CONFORMITY` contra
+`ConformityValue` (`CONFORMING`/`NON_CONFORMING`/`NOT_APPLICABLE`); o da
+execução aceita qualquer texto.
 
 ---
 

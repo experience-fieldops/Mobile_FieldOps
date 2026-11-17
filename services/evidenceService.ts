@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { apiRequest } from './api';
 import { ApiResponse } from './inspectionService';
 import { EvidenceResponse } from '../types/inspectionApi';
@@ -6,11 +7,16 @@ import { EvidenceResponse } from '../types/inspectionApi';
  * Serviço de evidências (upload de fotos).
  *
  * POST /api/v1/inspections/{id}/evidences — multipart/form-data, campo `file`.
- * A evidência pode ser vinculada a uma resposta (responseId) e/ou a uma
- * não conformidade (nonConformityId).
+ * A evidência pode ser vinculada a uma não conformidade (nonConformityId).
+ *
+ * Atenção: `responseId` é o id de um InspectionResponse (fluxo
+ * /inspections/{id}/responses), NÃO o id de ChecklistResponse da execução.
+ * Passar o id da execução gera 404. Ver BACKEND_MELHORIAS.md (B-12).
+ * Tipos aceitos pelo backend: JPEG, PNG, WEBP, HEIC, PDF (até 10 MB).
  */
 
 export interface UploadEvidenceOptions {
+  /** Id de InspectionResponse (não de ChecklistResponse). */
   responseId?: number;
   nonConformityId?: number;
 }
@@ -32,15 +38,26 @@ export async function uploadEvidence(
   fileUri: string,
   options: UploadEvidenceOptions = {},
 ): Promise<EvidenceResponse> {
-  const { name, type } = fileInfoFromUri(fileUri);
-
   const form = new FormData();
-  // No React Native, arquivos em FormData usam { uri, name, type }.
-  form.append('file', {
-    uri: fileUri,
-    name,
-    type,
-  } as unknown as Blob);
+
+  if (Platform.OS === 'web') {
+    // No navegador o FormData não entende { uri, name, type } (vira texto e
+    // o backend não recebe a parte `file`). A URI do image-picker no web é
+    // blob:/data:, então lemos o arquivo como Blob e anexamos com nome.
+    const blob = await (await fetch(fileUri)).blob();
+    const type = blob.type || 'image/jpeg';
+    const ext =
+      type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : 'jpg';
+    form.append('file', blob, `evidence-${Date.now()}.${ext}`);
+  } else {
+    // No React Native nativo, arquivos em FormData usam { uri, name, type }.
+    const { name, type } = fileInfoFromUri(fileUri);
+    form.append('file', {
+      uri: fileUri,
+      name,
+      type,
+    } as unknown as Blob);
+  }
 
   const params = new URLSearchParams({
     uploadedByUserId: String(uploadedByUserId),

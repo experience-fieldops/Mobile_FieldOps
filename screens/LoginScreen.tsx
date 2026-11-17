@@ -15,6 +15,7 @@ import { Eye, EyeOff } from 'lucide-react-native';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import AppText from '../components/AppText';
 import { useAuth } from '../context/AuthContext';
+import { getHttpStatus } from '../services/api';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>;
 
@@ -28,6 +29,18 @@ export default function LoginScreen({ navigation }: Props) {
   // para ativar o auto-login na próxima abertura.
   const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
+  // Mensagem exibida abaixo da senha quando o backend recusa as credenciais.
+  const [loginError, setLoginError] = useState<string | null>(null);
+
+  function handleEmailChange(value: string) {
+    setEmail(value);
+    if (loginError) setLoginError(null);
+  }
+
+  function handlePasswordChange(value: string) {
+    setPassword(value);
+    if (loginError) setLoginError(null);
+  }
 
   async function handleLogin() {
     if (!email.trim() || !password) {
@@ -35,18 +48,37 @@ export default function LoginScreen({ navigation }: Props) {
       return;
     }
 
+    setLoginError(null);
     setLoading(true);
+    const attemptStart = Date.now();
+    if (__DEV__) console.log('[Login] Tentativa iniciada (loading=true).');
     try {
       await login(email, password, rememberMe);
       // A troca de Login -> Main é controlada pelo estado de autenticação
       // no AppNavigator (renderização condicional), então não é preciso
       // navegar manualmente aqui.
     } catch (err) {
-      const message =
-        err instanceof Error ? err.message : 'Erro ao realizar login.';
-      Alert.alert('Falha no login', message);
+      const status = getHttpStatus(err);
+      if (status === 401 || status === 400) {
+        // 401: e-mail inexistente ou senha errada (o backend responde igual
+        //      para os dois, sem revelar se a conta existe).
+        // 400: e-mail com formato inválido (@Email no LoginRequest). Campos
+        //      vazios já são barrados antes da chamada.
+        // Em ambos, mostra a mesma mensagem junto aos campos.
+        setLoginError('E-mail ou senha incorretos.');
+      } else {
+        // Rede, timeout, servidor etc. seguem no alerta, com a mensagem real.
+        const message =
+          err instanceof Error ? err.message : 'Erro ao realizar login.';
+        Alert.alert('Falha no login', message);
+      }
     } finally {
       setLoading(false);
+      if (__DEV__) {
+        console.log('[Login] Tentativa finalizada (loading=false):', {
+          durationMs: Date.now() - attemptStart,
+        });
+      }
     }
   }
 
@@ -64,25 +96,34 @@ export default function LoginScreen({ navigation }: Props) {
 
       <View style={styles.margin}>
         <TextInput
-          style={[styles.input, styles.emailInput]}
+          style={[
+            styles.input,
+            styles.emailInput,
+            loginError && styles.inputError,
+          ]}
           placeholder="E-MAIL"
           placeholderTextColor="#999"
           keyboardType="email-address"
           autoCapitalize="none"
           autoCorrect={false}
           value={email}
-          onChangeText={setEmail}
+          onChangeText={handleEmailChange}
           editable={!loading}
         />
 
-        <View style={styles.passwordContainer}>
+        <View
+          style={[
+            styles.passwordContainer,
+            loginError && styles.passwordContainerError,
+          ]}
+        >
           <TextInput
             style={styles.passwordInput}
             placeholder="SENHA"
             placeholderTextColor="#999"
             secureTextEntry={!showPassword}
             value={password}
-            onChangeText={setPassword}
+            onChangeText={handlePasswordChange}
             editable={!loading}
             onSubmitEditing={handleLogin}
             returnKeyType="done"
@@ -98,6 +139,16 @@ export default function LoginScreen({ navigation }: Props) {
             )}
           </TouchableOpacity>
         </View>
+
+        {loginError ? (
+          <AppText
+            style={styles.errorText}
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+          >
+            {loginError}
+          </AppText>
+        ) : null}
 
         <View style={styles.rememberContainer}>
           <TouchableOpacity
@@ -220,6 +271,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 25,
+  },
+
+  // Estado de erro de login. A margem menor do campo de senha (6) somada à
+  // altura da mensagem (16) e ao espaço abaixo dela (3) mantém os mesmos 25
+  // do estado normal, então o restante da tela não se desloca.
+  inputError: {
+    borderColor: '#E53935',
+  },
+
+  passwordContainerError: {
+    borderColor: '#E53935',
+    marginBottom: 6,
+  },
+
+  errorText: {
+    color: '#E53935',
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: 'Inter_600SemiBold',
+    marginBottom: 3,
+    marginLeft: 4,
   },
 
   passwordInput: {

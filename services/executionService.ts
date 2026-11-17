@@ -34,6 +34,23 @@ export async function startExecution(
 }
 
 /**
+ * GET /api/v1/inspections/{inspectionId}/executions
+ * Lista as execuções de uma inspeção (mais recentes primeiro).
+ * Usado para retomar uma execução em andamento em vez de criar outra
+ * (o backend recusa com 409 se já houver uma IN_PROGRESS).
+ */
+export async function listExecutions(
+  token: string,
+  inspectionId: number,
+): Promise<ExecutionResponse[]> {
+  const response = await apiRequest<ApiResponse<ExecutionResponse[]>>(
+    `/api/v1/inspections/${inspectionId}/executions`,
+    token,
+  );
+  return response.data ?? [];
+}
+
+/**
  * POST /api/v1/executions/{executionId}/responses
  * Grava a resposta de um item do checklist.
  */

@@ -147,7 +147,7 @@ export default function InspectionFormScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <StatusBar barStyle="light-content" backgroundColor="#132539" />
+      <StatusBar barStyle="light-content" />
 
       {/* ── Header ─────────────────────────────────────── */}
       <View style={styles.header}>

@@ -31,6 +31,13 @@ import AppText from '../components/AppText';
 import { Inspection, InspectionStatus, Priority } from '../data/inspections';
 import { mapInspections } from '../data/mappers';
 import { getAssignedInspections } from '../services/inspectionService';
+import { isNetworkError } from '../services/api';
+import {
+  getCachedInspections,
+  prefetchExecutableDetails,
+  saveCachedInspections,
+} from '../services/offlineStore';
+import { getQueue } from '../services/syncQueue';
 import { useAuth } from '../context/AuthContext';
 import {
   MainTabParamList,
@@ -45,7 +52,6 @@ type InspectionsNavProp = CompositeNavigationProp<
 type FilterOption = 'Todas' | InspectionStatus;
 const FILTERS: FilterOption[] = [
   'Todas',
-  'Atribuída',
   'Em Andamento',
   'Atrasada',
   'Devolvida',
@@ -243,6 +249,8 @@ export default function InspectionsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Lista exibida a partir da cópia salva no aparelho (sem conexão).
+  const [offline, setOffline] = useState(false);
 
   // Busca as inspeções atribuídas ao técnico logado.
   const loadInspections = useCallback(
@@ -257,10 +265,42 @@ export default function InspectionsScreen() {
       else setLoading(true);
       setError(null);
 
+      // Finalizadas no aparelho e ainda na fila aparecem como concluídas
+      // (saem de "Em Andamento"), mesmo antes de o servidor saber.
+      const markQueued = async (list: Inspection[]) => {
+        const queued = new Set(
+          (await getQueue(user.id))
+            .filter((q) => q.status === 'pending')
+            .map((q) => q.inspectionId),
+        );
+        return list.map((i) =>
+          queued.has(i.id) ? { ...i, status: 'Concluída' as const } : i,
+        );
+      };
+
       try {
         const page = await getAssignedInspections(token, user.id);
-        setInspections(mapInspections(page.content));
+        setOffline(false);
+        setInspections(await markQueued(mapInspections(page.content)));
+
+        // Guarda a lista e baixa os checklists das inspeções que ainda
+        // podem ser executadas, para abrir sem internet depois.
+        await saveCachedInspections(user.id, page.content).catch(() => {});
+        prefetchExecutableDetails(token, user.id, page.content).catch(() => {});
       } catch (err) {
+        if (isNetworkError(err)) {
+          const cached = await getCachedInspections(user.id);
+          if (cached) {
+            setOffline(true);
+            setInspections(await markQueued(mapInspections(cached)));
+            return;
+          }
+          setError(
+            'Sem conexão e nenhuma inspeção salva no aparelho. ' +
+              'Conecte-se à internet para baixar suas inspeções.',
+          );
+          return;
+        }
         const message =
           err instanceof Error ? err.message : 'Erro ao carregar inspeções.';
         setError(message);
@@ -296,7 +336,7 @@ export default function InspectionsScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#132539" />
+      <StatusBar barStyle="light-content" />
 
       {/* ── Header ─────────────────────────────────────── */}
       <View style={styles.header}>
@@ -340,6 +380,16 @@ export default function InspectionsScreen() {
           </View>
         </View>
       </View>
+
+      {/* ── Aviso de dados offline ──────────────────────── */}
+      {offline && (
+        <View style={styles.offlineBanner}>
+          <WifiOff size={16} color="#E65100" />
+          <AppText style={styles.offlineBannerText}>
+            Sem conexão. Exibindo as inspeções salvas no aparelho.
+          </AppText>
+        </View>
+      )}
 
       {/* ── Filtros por status ──────────────────────────── */}
       <ScrollView
@@ -475,7 +525,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 15,
+    paddingTop: 50,
     paddingBottom: 25,
   },
   headerBrand: {},
@@ -533,6 +583,22 @@ const styles = StyleSheet.create({
   statCardReturned: { backgroundColor: '#FFF3E0' },
   statNumberReturned: { color: '#E65100' },
   statLabelReturned: { color: '#E65100' },
+
+  // Aviso de dados offline
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFF3E0',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  offlineBannerText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#E65100',
+  },
 
   // Filtros
   filtersScroll: {

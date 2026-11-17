@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View,
   ScrollView,
+  ScrollViewInstance,
   TouchableOpacity,
   TextInput,
   StyleSheet,
@@ -25,6 +26,7 @@ import {
   X,
   CheckCircle2,
   Circle,
+  WifiOff,
 } from 'lucide-react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -38,22 +40,46 @@ import {
   ChecklistEvidence,
   Severity,
 } from '../data/inspections';
-import {
-  mapSnapshotsToChecklist,
-  toChecklistResponseRequest,
-  mapSeverity,
-} from '../data/mappers';
+import { mapSnapshotsToChecklist } from '../data/mappers';
 import { getInspectionById } from '../services/inspectionService';
+import { startExecution, listExecutions } from '../services/executionService';
+import { isNetworkError } from '../services/api';
 import {
-  startExecution,
-  saveResponse,
-  completeExecution,
-} from '../services/executionService';
-import { uploadEvidence } from '../services/evidenceService';
-import { createNonConformity } from '../services/nonConformityService';
-import { getCurrentCoordinates } from '../services/location';
+  getCachedInspectionDetail,
+  isExecutable,
+  saveCachedInspectionDetail,
+} from '../services/offlineStore';
+import {
+  enqueueInspection,
+  getQueuedInspection,
+  syncInspection,
+  toLocalDateTime,
+} from '../services/syncQueue';
+import { BackendInspectionStatus } from '../types/inspectionApi';
+
+// Rótulos para os status em que o backend não permite executar.
+const NOT_EXECUTABLE_LABEL: Partial<Record<BackendInspectionStatus, string>> = {
+  COMPLETED: 'concluída',
+  UNDER_REVIEW: 'em revisão',
+  APPROVED: 'aprovada',
+  REJECTED: 'devolvida',
+  CANCELLED: 'cancelada',
+};
+import { Coordinates, getCurrentCoordinates } from '../services/location';
 import { useAuth } from '../context/AuthContext';
 import { RootStackParamList } from '../navigation/AppNavigator';
+
+/**
+ * Mensagem ao usuário. No web o Alert do react-native-web não exibe
+ * nada, então usa o alert do navegador.
+ */
+function notify(title: string, message: string) {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+}
 
 // ─────────────────────────────────────────────────────────────
 // Tipos de navegação
@@ -491,11 +517,17 @@ export default function ChecklistExecutionScreen() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Modo offline: inspeção aberta a partir da cópia salva no aparelho.
+  const [offlineMode, setOfflineMode] = useState(false);
+  const [inspectionTitle, setInspectionTitle] = useState('');
+  const [startedAt, setStartedAt] = useState<string>(() => toLocalDateTime());
+  const [startGps, setStartGps] = useState<Coordinates | null>(null);
+
   const [currentIndex, setCurrentIndex] = useState(0);
   // Exibe aviso de obrigatório se o usuário tentar avançar sem responder
   const [showRequired, setShowRequired] = useState(false);
 
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<ScrollViewInstance>(null);
 
   // Carrega os itens do checklist (itemSnapshots) e inicia a execução
   // com a coordenada GPS atual (obrigatória no backend).
@@ -512,22 +544,108 @@ export default function ChecklistExecutionScreen() {
       setLoading(true);
       setError(null);
 
+      // Já finalizada e aguardando envio: não executa de novo.
+      const queued = await getQueuedInspection(user.id, inspectionId);
+      if (queued && queued.status === 'pending') {
+        if (!active) return;
+        setError(
+          'Esta inspeção já foi finalizada e está na fila para ' +
+            'sincronização. Ela será enviada quando houver internet.',
+        );
+        setLoading(false);
+        return;
+      }
+
       try {
         const dto = await getInspectionById(token, inspectionId);
-        const checklist = mapSnapshotsToChecklist(dto.itemSnapshots ?? []);
+        // Mantém a cópia local atualizada para uso offline.
+        await saveCachedInspectionDetail(user.id, dto).catch(() => {});
 
-        const coords = await getCurrentCoordinates();
-        const exec = await startExecution(token, inspectionId, user.id, {
-          gpsLatitude: coords.latitude,
-          gpsLongitude: coords.longitude,
-          startedAt: new Date().toISOString(),
-        });
+        // O backend só aceita executar inspeções agendadas ou em andamento
+        // (senão responde 409). Avisa antes, com o motivo real.
+        if (!isExecutable(dto.status)) {
+          if (!active) return;
+          setError(
+            `Esta inspeção está ${NOT_EXECUTABLE_LABEL[dto.status] ?? dto.status} ` +
+              'e não pode ser executada.',
+          );
+          return;
+        }
+
+        // Se um envio anterior falhou, reabre com as respostas da fila
+        // para o técnico corrigir; senão, começa do checklist do servidor.
+        const checklist =
+          queued?.items ?? mapSnapshotsToChecklist(dto.itemSnapshots ?? []);
+        if (active) setInspectionTitle(dto.templateTitle);
+
+        // Retoma a execução em andamento, se houver. Criar outra seria
+        // recusado com 409 ("Já existe uma execução em andamento").
+        const executions = await listExecutions(token, inspectionId);
+        const running = executions.find((e) => e.status === 'IN_PROGRESS');
+
+        let execId: number;
+        if (running) {
+          if (running.technicianId !== user.id) {
+            if (!active) return;
+            setError(
+              'Esta inspeção já está sendo executada por outro técnico.',
+            );
+            return;
+          }
+          execId = running.id;
+        } else {
+          const coords = await getCurrentCoordinates();
+          const exec = await startExecution(token, inspectionId, user.id, {
+            gpsLatitude: coords.latitude,
+            gpsLongitude: coords.longitude,
+            startedAt: new Date().toISOString(),
+          });
+          execId = exec.id;
+        }
 
         if (!active) return;
         setItems(checklist);
-        setExecutionId(exec.id);
+        setExecutionId(execId);
       } catch (err) {
         if (!active) return;
+
+        if (isNetworkError(err)) {
+          // ── Sem conexão: abre a cópia salva no aparelho ──
+          const cached = await getCachedInspectionDetail(user.id, inspectionId);
+          if (!active) return;
+          if (!cached) {
+            setError(
+              'Sem conexão, e esta inspeção ainda não foi baixada para uso ' +
+                'offline. Abra a lista de inspeções com internet para ' +
+                'baixá-la.',
+            );
+            return;
+          }
+          if (!isExecutable(cached.status)) {
+            setError(
+              `Esta inspeção está ${NOT_EXECUTABLE_LABEL[cached.status] ?? cached.status} ` +
+                'e não pode ser executada.',
+            );
+            return;
+          }
+
+          // GPS funciona sem internet no celular. Se falhar (ex.: navegador
+          // offline), segue sem: a posição do fim é usada no envio.
+          const coords = await getCurrentCoordinates().catch(() => null);
+          if (!active) return;
+
+          setItems(
+            queued?.items ??
+              mapSnapshotsToChecklist(cached.itemSnapshots ?? []),
+          );
+          setInspectionTitle(cached.templateTitle);
+          setExecutionId(queued?.executionId ?? null);
+          setStartGps(coords);
+          setStartedAt(queued?.startedAt ?? toLocalDateTime());
+          setOfflineMode(true);
+          return;
+        }
+
         const message =
           err instanceof Error ? err.message : 'Erro ao iniciar a inspeção.';
         setError(message);
@@ -626,62 +744,74 @@ export default function ChecklistExecutionScreen() {
     }
   }
 
-  // Envia respostas, evidências e não conformidades, e finaliza a execução.
+  // Finaliza: coloca a inspeção na fila de sincronização e, se houver
+  // conexão, envia na hora. Sem conexão, ela fica na fila até a internet
+  // voltar (o envio automático cuida disso). Ver services/syncQueue.ts.
   async function submitChecklist() {
-    if (!token || user == null || executionId == null) {
-      Alert.alert('Erro', 'Execução não inicializada.');
+    if (!token || user == null) {
+      notify('Erro', 'Sessão inválida. Faça login novamente.');
+      return;
+    }
+    if (!offlineMode && executionId == null) {
+      notify('Erro', 'Execução não inicializada.');
       return;
     }
 
     setSubmitting(true);
     try {
-      const respondedAt = new Date().toISOString();
+      const endGps = await getCurrentCoordinates().catch(() => null);
 
-      for (const it of items) {
-        if (it.id == null) continue;
-
-        // 1) Grava a resposta do item e captura o responseId.
-        const saved = await saveResponse(
-          token,
-          executionId,
-          user.id,
-          toChecklistResponseRequest(it, { respondedAt }),
-        );
-
-        // 2) Não conformidade quando item é Inconforme.
-        let nonConformityId: number | undefined;
-        if (it.type === 'CONFORMITY' && it.answer === 'Inconforme') {
-          const nc = await createNonConformity(token, inspectionId, {
-            title: it.title,
-            severity: mapSeverity(it.ncSeverity ?? 'Média'),
-            description: it.observation || undefined,
-            snapshotItemId: it.id,
-            evidenceAttached: it.evidences.length > 0,
-          });
-          nonConformityId = nc.id;
-        }
-
-        // 3) Sobe cada evidência vinculada à resposta (e à NC, se houver).
-        for (const ev of it.evidences) {
-          await uploadEvidence(token, inspectionId, user.id, ev.uri, {
-            responseId: saved.id,
-            nonConformityId,
-          });
-        }
-      }
-
-      const coords = await getCurrentCoordinates().catch(() => null);
-      await completeExecution(token, executionId, user.id, {
-        endGpsLatitude: coords?.latitude,
-        endGpsLongitude: coords?.longitude,
-        completedAt: new Date().toISOString(),
+      await enqueueInspection({
+        inspectionId,
+        userId: user.id,
+        code: `INSP-${inspectionId}`,
+        title: inspectionTitle || `Inspeção ${inspectionId}`,
+        items,
+        executionId,
+        startedAt,
+        startGps,
+        completedAt: toLocalDateTime(),
+        endGps,
       });
 
-      navigation.goBack();
+      if (offlineMode) {
+        notify(
+          'Inspeção salva',
+          'Sem conexão. A inspeção foi salva na fila para sincronização ' +
+            'e será enviada automaticamente quando houver internet.',
+        );
+        navigation.goBack();
+        return;
+      }
+
+      const result = await syncInspection(token, user.id, inspectionId);
+
+      if (result.status === 'synced') {
+        navigation.goBack();
+        return;
+      }
+
+      if (result.status === 'offline') {
+        notify(
+          'Inspeção salva',
+          'A conexão caiu durante o envio. A inspeção ficou na fila para ' +
+            'sincronização e será enviada quando houver internet.',
+        );
+        navigation.goBack();
+        return;
+      }
+
+      // Recusa do servidor: fica na fila com o motivo; o técnico pode
+      // corrigir e finalizar de novo (a fila preserva o que já foi enviado).
+      notify(
+        'Falha ao finalizar',
+        `${result.message}\n\nA inspeção ficou na fila de sincronização. ` +
+          'Corrija e finalize novamente, ou tente pela tela de Sincronização.',
+      );
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : 'Erro ao enviar a inspeção.';
-      Alert.alert('Falha ao finalizar', message);
+        err instanceof Error ? err.message : 'Erro ao salvar a inspeção.';
+      notify('Falha ao finalizar', message);
     } finally {
       setSubmitting(false);
     }
@@ -756,7 +886,7 @@ export default function ChecklistExecutionScreen() {
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <StatusBar barStyle="light-content" backgroundColor="#132539" />
+      <StatusBar barStyle="light-content" />
 
       {/* ── Header ─────────────────────────────────────── */}
       <View style={styles.header}>
@@ -781,6 +911,17 @@ export default function ChecklistExecutionScreen() {
       <View style={styles.progressTrack}>
         <View style={[styles.progressFill, { width: `${progressPct}%` }]} />
       </View>
+
+      {/* Aviso de modo offline */}
+      {offlineMode && (
+        <View style={styles.offlineBanner}>
+          <WifiOff size={16} color="#E65100" />
+          <AppText style={styles.offlineBannerText}>
+            Sem conexão. Ao finalizar, a inspeção fica na fila para
+            sincronização.
+          </AppText>
+        </View>
+      )}
 
       {/* ── Conteúdo ────────────────────────────────────── */}
       <ScrollView
@@ -1136,6 +1277,22 @@ const styles = StyleSheet.create({
   progressFill: {
     height: '100%',
     backgroundColor: '#45A835',
+  },
+
+  // Aviso de modo offline
+  offlineBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFF3E0',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  offlineBannerText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: 'Inter_600SemiBold',
+    color: '#E65100',
   },
 
   // Scroll
