@@ -131,6 +131,10 @@ export default function LoginScreen({ navigation }: Props) {
           <TouchableOpacity
             style={styles.eyeButton}
             onPress={() => setShowPassword((v) => !v)}
+            accessibilityRole="button"
+            accessibilityLabel={
+              showPassword ? 'Ocultar senha' : 'Mostrar senha'
+            }
           >
             {showPassword ? (
               <EyeOff size={20} color="#777" />
@@ -154,6 +158,9 @@ export default function LoginScreen({ navigation }: Props) {
           <TouchableOpacity
             style={[styles.switch, rememberMe && styles.switchActive]}
             onPress={() => setRememberMe((v) => !v)}
+            accessibilityRole="switch"
+            accessibilityLabel="Lembrar de mim"
+            accessibilityState={{ checked: rememberMe }}
           >
             <View
               style={[
@@ -168,6 +175,9 @@ export default function LoginScreen({ navigation }: Props) {
         <TouchableOpacity
           style={[styles.loginButton, loading && styles.loginButtonDisabled]}
           onPress={handleLogin}
+          accessibilityRole="button"
+          accessibilityLabel="Entrar"
+          accessibilityState={{ disabled: loading, busy: loading }}
           disabled={loading}
           activeOpacity={0.8}
         >

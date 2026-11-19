@@ -28,10 +28,11 @@ import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import AppText from '../components/AppText';
+import NetworkStatus from '../components/NetworkStatus';
 import { Inspection, InspectionStatus, Priority } from '../data/inspections';
 import { mapInspections } from '../data/mappers';
 import { getAssignedInspections } from '../services/inspectionService';
-import { isNetworkError } from '../services/api';
+import { getHttpStatus, isNetworkError } from '../services/api';
 import {
   getCachedInspections,
   prefetchExecutableDetails,
@@ -91,7 +92,13 @@ function InspectionCard({
   onPress: () => void;
 }) {
   return (
-    <TouchableOpacity style={styles.card} activeOpacity={0.7} onPress={onPress}>
+    <TouchableOpacity
+      style={styles.card}
+      activeOpacity={0.7}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Inspeção ${item.title}, status ${item.status}, prazo ${item.deadline}`}
+    >
       <View style={styles.cardHeader}>
         <View style={styles.cardHeaderLeft}>
           <PriorityBadge priority={item.priority} />
@@ -211,6 +218,8 @@ function InspectionModal({
             <TouchableOpacity
               style={styles.btnCancel}
               onPress={onClose}
+              accessibilityRole="button"
+              accessibilityLabel="Cancelar"
               activeOpacity={0.7}
             >
               <AppText style={styles.btnCancelText}>Cancelar</AppText>
@@ -219,6 +228,8 @@ function InspectionModal({
             <TouchableOpacity
               style={styles.btnScan}
               onPress={onScan}
+              accessibilityRole="button"
+              accessibilityLabel="Escanear QR code e iniciar inspeção"
               activeOpacity={0.7}
             >
               <AppText style={styles.btnScanText}>Iniciar</AppText>
@@ -249,8 +260,9 @@ export default function InspectionsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Lista exibida a partir da cópia salva no aparelho (sem conexão).
-  const [offline, setOffline] = useState(false);
+  // Lista exibida a partir da cópia salva no aparelho: aviso a mostrar
+  // (sem conexão ou sessão vencida). null = dados vieram do servidor.
+  const [offline, setOffline] = useState<string | null>(null);
 
   // Busca as inspeções atribuídas ao técnico logado.
   const loadInspections = useCallback(
@@ -273,26 +285,42 @@ export default function InspectionsScreen() {
             .filter((q) => q.status === 'pending')
             .map((q) => q.inspectionId),
         );
-        return list.map((i) =>
-          queued.has(i.id) ? { ...i, status: 'Concluída' as const } : i,
+        return list.filter(
+          (i) => !queued.has(i.id) && i.status !== 'Concluída',
         );
       };
 
       try {
         const page = await getAssignedInspections(token, user.id);
-        setOffline(false);
-        setInspections(await markQueued(mapInspections(page.content)));
+        setOffline(null);
+        setInspections(
+          await markQueued(
+            mapInspections(
+              page.content.filter((d) => d.status !== 'CANCELLED'),
+            ),
+          ),
+        );
 
         // Guarda a lista e baixa os checklists das inspeções que ainda
         // podem ser executadas, para abrir sem internet depois.
         await saveCachedInspections(user.id, page.content).catch(() => {});
         prefetchExecutableDetails(token, user.id, page.content).catch(() => {});
       } catch (err) {
-        if (isNetworkError(err)) {
+        const expired = getHttpStatus(err) === 401;
+        if (isNetworkError(err) || expired) {
           const cached = await getCachedInspections(user.id);
           if (cached) {
-            setOffline(true);
-            setInspections(await markQueued(mapInspections(cached)));
+            setOffline(
+              expired
+                ? 'Sessão expirada. Exibindo as inspeções salvas no aparelho; ' +
+                    'faça login novamente para sincronizar.'
+                : 'Sem conexão. Exibindo as inspeções salvas no aparelho.',
+            );
+            setInspections(
+              await markQueued(
+                mapInspections(cached.filter((d) => d.status !== 'CANCELLED')),
+              ),
+            );
             return;
           }
           setError(
@@ -321,6 +349,9 @@ export default function InspectionsScreen() {
 
   const filteredInspections = useMemo(() => {
     if (activeFilter === 'Todas') return inspections;
+    if (activeFilter === 'Atrasada') {
+      return inspections.filter((i) => i.deadlineOverdue);
+    }
     return inspections.filter((i) => i.status === activeFilter);
   }, [activeFilter, inspections]);
 
@@ -328,7 +359,7 @@ export default function InspectionsScreen() {
     () => ({
       assigned: inspections.length,
       inProgress: inspections.filter((i) => i.status === 'Em Andamento').length,
-      overdue: inspections.filter((i) => i.status === 'Atrasada').length,
+      overdue: inspections.filter((i) => i.deadlineOverdue).length,
       returned: inspections.filter((i) => i.status === 'Devolvida').length,
     }),
     [inspections],
@@ -344,10 +375,7 @@ export default function InspectionsScreen() {
           <AppText style={styles.headerBrandField}>FIELD </AppText>
           <AppText style={styles.headerBrandOps}>OPS</AppText>
         </AppText>
-        <View style={styles.offlineContainer}>
-          <AppText style={styles.offlineText}>Modo Offline</AppText>
-          <WifiOff size={18} color="#E53935" style={styles.offlineIcon} />
-        </View>
+        <NetworkStatus />
       </View>
 
       {/* ── Título + Contadores ─────────────────────────── */}
@@ -385,9 +413,7 @@ export default function InspectionsScreen() {
       {offline && (
         <View style={styles.offlineBanner}>
           <WifiOff size={16} color="#E65100" />
-          <AppText style={styles.offlineBannerText}>
-            Sem conexão. Exibindo as inspeções salvas no aparelho.
-          </AppText>
+          <AppText style={styles.offlineBannerText}>{offline}</AppText>
         </View>
       )}
 
@@ -406,6 +432,9 @@ export default function InspectionsScreen() {
               activeFilter === filter && styles.filterChipActive,
             ]}
             onPress={() => setActiveFilter(filter)}
+            accessibilityRole="button"
+            accessibilityLabel={`Filtrar: ${filter}`}
+            accessibilityState={{ selected: activeFilter === filter }}
             activeOpacity={0.7}
           >
             <AppText
@@ -481,6 +510,8 @@ export default function InspectionsScreen() {
           style={styles.tabItem}
           activeOpacity={0.7}
           onPress={() => navigation.navigate('Sincronizar')}
+          accessibilityRole="tab"
+          accessibilityLabel="Sincronizar"
         >
           <RefreshCw size={22} color="#888" />
           <AppText style={styles.tabLabel}>SINCRONIZAR</AppText>
@@ -489,6 +520,8 @@ export default function InspectionsScreen() {
           style={styles.tabItem}
           activeOpacity={0.7}
           onPress={() => navigation.navigate('Perfil')}
+          accessibilityRole="tab"
+          accessibilityLabel="Perfil"
         >
           <User size={22} color="#888" />
           <AppText style={styles.tabLabel}>PERFIL</AppText>

@@ -27,7 +27,13 @@ export interface UploadEvidenceOptions {
 function fileInfoFromUri(uri: string): { name: string; type: string } {
   const name = uri.split('/').pop() || `evidence-${Date.now()}.jpg`;
   const ext = name.includes('.') ? name.split('.').pop()!.toLowerCase() : 'jpg';
-  const type = ext === 'png' ? 'image/png' : 'image/jpeg';
+  const types: Record<string, string> = {
+    png: 'image/png',
+    webp: 'image/webp',
+    heic: 'image/heic',
+    pdf: 'application/pdf',
+  };
+  const type = types[ext] ?? 'image/jpeg';
   return { name, type };
 }
 
@@ -50,12 +56,16 @@ export async function uploadEvidence(
       type === 'image/png' ? 'png' : type === 'image/webp' ? 'webp' : 'jpg';
     form.append('file', blob, `evidence-${Date.now()}.${ext}`);
   } else {
-    // No React Native nativo, arquivos em FormData usam { uri, name, type }.
+    // No celular o fetch é o `expo/fetch`, que não aceita { uri, name, type }
+    // ("uri is not supported"). Ele aceita uma parte com `bytes()`, `name` e
+    // `type`, então lemos o arquivo com o expo-file-system.
+    const { File } = await import('expo-file-system');
+    const file = new File(fileUri);
     const { name, type } = fileInfoFromUri(fileUri);
     form.append('file', {
-      uri: fileUri,
       name,
       type,
+      bytes: () => file.bytes(),
     } as unknown as Blob);
   }
 

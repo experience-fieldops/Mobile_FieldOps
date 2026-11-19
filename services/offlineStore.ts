@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import AsyncStorage from './kvStorage';
 
 import { BackendInspection } from '../types/inspectionApi';
 import { getInspectionById } from './inspectionService';

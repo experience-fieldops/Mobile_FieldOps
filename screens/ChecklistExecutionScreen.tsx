@@ -43,7 +43,14 @@ import {
 import { mapSnapshotsToChecklist } from '../data/mappers';
 import { getInspectionById } from '../services/inspectionService';
 import { startExecution, listExecutions } from '../services/executionService';
-import { isNetworkError } from '../services/api';
+import { getHttpStatus, isNetworkError } from '../services/api';
+import {
+  clearDraft,
+  getDraft,
+  InspectionDraft,
+  saveDraft,
+} from '../services/draftStore';
+import { deletePhoto, persistPhoto } from '../services/photoStore';
 import {
   getCachedInspectionDetail,
   isExecutable,
@@ -65,7 +72,12 @@ const NOT_EXECUTABLE_LABEL: Partial<Record<BackendInspectionStatus, string>> = {
   REJECTED: 'devolvida',
   CANCELLED: 'cancelada',
 };
-import { Coordinates, getCurrentCoordinates } from '../services/location';
+import {
+  Coordinates,
+  getCurrentCoordinates,
+  LocationError,
+} from '../services/location';
+import LocationConsent from '../components/LocationConsent';
 import { useAuth } from '../context/AuthContext';
 import { RootStackParamList } from '../navigation/AppNavigator';
 
@@ -522,6 +534,17 @@ export default function ChecklistExecutionScreen() {
   const [inspectionTitle, setInspectionTitle] = useState('');
   const [startedAt, setStartedAt] = useState<string>(() => toLocalDateTime());
   const [startGps, setStartGps] = useState<Coordinates | null>(null);
+  // Motivo do modo offline, exibido no aviso.
+  const [offlineReason, setOfflineReason] = useState<string | null>(null);
+  // Checklist carregado: a partir daqui as respostas vão para o rascunho.
+  const [ready, setReady] = useState(false);
+
+  // Localização obrigatória: ao abrir (início) e ao finalizar. Sem ela a
+  // inspeção não inicia nem finaliza.
+  const [consentGps, setConsentGps] = useState<Coordinates | null>(null);
+  const [finishAsk, setFinishAsk] = useState(false);
+  const [locBusy, setLocBusy] = useState(false);
+  const [locError, setLocError] = useState<Error | null>(null);
 
   const [currentIndex, setCurrentIndex] = useState(0);
   // Exibe aviso de obrigatório se o usuário tentar avançar sem responder
@@ -529,12 +552,16 @@ export default function ChecklistExecutionScreen() {
 
   const scrollRef = useRef<ScrollViewInstance>(null);
 
-  // Carrega os itens do checklist (itemSnapshots) e inicia a execução
-  // com a coordenada GPS atual (obrigatória no backend).
+  // Abre a inspeção. Com internet: busca no servidor e retoma/cria a
+  // execução. Sem internet (ou sessão vencida): usa a cópia salva no
+  // aparelho. Em ambos, as respostas já dadas (rascunho) são restauradas.
   useEffect(() => {
     let active = true;
 
     async function init() {
+      // Só abre depois que o técnico compartilhou a localização.
+      if (!consentGps) return;
+
       if (!token || user == null) {
         setError('Sessão inválida. Faça login novamente.');
         setLoading(false);
@@ -543,6 +570,7 @@ export default function ChecklistExecutionScreen() {
 
       setLoading(true);
       setError(null);
+      setReady(false);
 
       // Já finalizada e aguardando envio: não executa de novo.
       const queued = await getQueuedInspection(user.id, inspectionId);
@@ -555,6 +583,9 @@ export default function ChecklistExecutionScreen() {
         setLoading(false);
         return;
       }
+
+      // Respostas salvas de uma abertura anterior (tela/app fechado).
+      const draft = await getDraft(user.id, inspectionId);
 
       try {
         const dto = await getInspectionById(token, inspectionId);
@@ -572,18 +603,21 @@ export default function ChecklistExecutionScreen() {
           return;
         }
 
-        // Se um envio anterior falhou, reabre com as respostas da fila
-        // para o técnico corrigir; senão, começa do checklist do servidor.
+        // Prioridade: rascunho > respostas de um envio que falhou > novo.
         const checklist =
-          queued?.items ?? mapSnapshotsToChecklist(dto.itemSnapshots ?? []);
-        if (active) setInspectionTitle(dto.templateTitle);
+          draft?.items ??
+          queued?.items ??
+          mapSnapshotsToChecklist(dto.itemSnapshots ?? []);
+        const begin =
+          draft?.startedAt ?? queued?.startedAt ?? toLocalDateTime();
 
         // Retoma a execução em andamento, se houver. Criar outra seria
         // recusado com 409 ("Já existe uma execução em andamento").
         const executions = await listExecutions(token, inspectionId);
         const running = executions.find((e) => e.status === 'IN_PROGRESS');
 
-        let execId: number;
+        let execId: number | null = null;
+        let gps: Coordinates | null = draft?.startGps ?? null;
         if (running) {
           if (running.technicianId !== user.id) {
             if (!active) return;
@@ -594,23 +628,33 @@ export default function ChecklistExecutionScreen() {
           }
           execId = running.id;
         } else {
-          const coords = await getCurrentCoordinates();
-          const exec = await startExecution(token, inspectionId, user.id, {
-            gpsLatitude: coords.latitude,
-            gpsLongitude: coords.longitude,
-            startedAt: new Date().toISOString(),
-          });
-          execId = exec.id;
+          // GPS é obrigatório para criar a execução. Se não houver posição
+          // agora, não trava a tela: a fila cria a execução no envio,
+          // usando a posição do fim.
+          gps = gps ?? consentGps;
+          if (gps) {
+            const exec = await startExecution(token, inspectionId, user.id, {
+              gpsLatitude: gps.latitude,
+              gpsLongitude: gps.longitude,
+              startedAt: begin,
+            });
+            execId = exec.id;
+          }
         }
 
         if (!active) return;
+        setInspectionTitle(dto.templateTitle);
         setItems(checklist);
         setExecutionId(execId);
+        setStartGps(gps);
+        setStartedAt(begin);
+        setReady(true);
       } catch (err) {
         if (!active) return;
 
-        if (isNetworkError(err)) {
-          // ── Sem conexão: abre a cópia salva no aparelho ──
+        const expired = getHttpStatus(err) === 401;
+        if (isNetworkError(err) || expired) {
+          // ── Sem conexão / sessão vencida: abre a cópia do aparelho ──
           const cached = await getCachedInspectionDetail(user.id, inspectionId);
           if (!active) return;
           if (!cached) {
@@ -629,20 +673,30 @@ export default function ChecklistExecutionScreen() {
             return;
           }
 
-          // GPS funciona sem internet no celular. Se falhar (ex.: navegador
-          // offline), segue sem: a posição do fim é usada no envio.
-          const coords = await getCurrentCoordinates().catch(() => null);
-          if (!active) return;
+          // GPS funciona sem internet no celular (com prazo e última
+          // posição conhecida). Se falhar, a posição do fim é usada.
+          const coords = draft?.startGps ?? consentGps;
 
           setItems(
-            queued?.items ??
+            draft?.items ??
+              queued?.items ??
               mapSnapshotsToChecklist(cached.itemSnapshots ?? []),
           );
           setInspectionTitle(cached.templateTitle);
-          setExecutionId(queued?.executionId ?? null);
+          setExecutionId(draft?.executionId ?? queued?.executionId ?? null);
           setStartGps(coords);
-          setStartedAt(queued?.startedAt ?? toLocalDateTime());
+          setStartedAt(
+            draft?.startedAt ?? queued?.startedAt ?? toLocalDateTime(),
+          );
+          setOfflineReason(
+            expired
+              ? 'Sessão expirada. As respostas ficam salvas no aparelho; ' +
+                  'faça login novamente para sincronizar.'
+              : 'Sem conexão. As respostas ficam salvas no aparelho e, ao ' +
+                  'finalizar, a inspeção vai para a fila de sincronização.',
+          );
           setOfflineMode(true);
+          setReady(true);
           return;
         }
 
@@ -658,7 +712,48 @@ export default function ChecklistExecutionScreen() {
     return () => {
       active = false;
     };
-  }, [token, user, inspectionId]);
+  }, [token, user, inspectionId, consentGps]);
+
+  // ── Rascunho: grava as respostas no aparelho a cada alteração ──
+  const finalizedRef = useRef(false);
+  const latestDraftRef = useRef<{
+    ready: boolean;
+    draft: InspectionDraft;
+  } | null>(null);
+  latestDraftRef.current = {
+    ready,
+    draft: {
+      items,
+      startedAt,
+      startGps,
+      executionId,
+      updatedAt: toLocalDateTime(),
+    },
+  };
+
+  useEffect(() => {
+    if (!ready || user == null) return;
+    const timer = setTimeout(() => {
+      saveDraft(user.id, inspectionId, {
+        items,
+        startedAt,
+        startGps,
+        executionId,
+        updatedAt: toLocalDateTime(),
+      }).catch(() => {});
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [ready, user, inspectionId, items, startedAt, startGps, executionId]);
+
+  // Ao sair da tela, grava o que ainda não foi salvo (exceto se finalizou).
+  useEffect(() => {
+    const userId = user?.id;
+    return () => {
+      const latest = latestDraftRef.current;
+      if (userId == null || finalizedRef.current || !latest?.ready) return;
+      saveDraft(userId, inspectionId, latest.draft).catch(() => {});
+    };
+  }, [user, inspectionId]);
 
   const total = items.length;
   const item = items[currentIndex];
@@ -706,12 +801,16 @@ export default function ChecklistExecutionScreen() {
     [currentIndex],
   );
 
+  // A foto é copiada para uma pasta permanente do app antes de entrar no
+  // checklist, para continuar disponível até a sincronização.
   const handleAddEvidence = useCallback(
-    (ev: ChecklistEvidence) => {
+    async (ev: ChecklistEvidence) => {
+      const idx = currentIndex;
+      const uri = await persistPhoto(ev.uri);
       setItems((prev) =>
-        prev.map((it, idx) =>
-          idx === currentIndex
-            ? { ...it, evidences: [...it.evidences, ev] }
+        prev.map((it, i) =>
+          i === idx
+            ? { ...it, evidences: [...it.evidences, { ...ev, uri }] }
             : it,
         ),
       );
@@ -721,6 +820,7 @@ export default function ChecklistExecutionScreen() {
 
   const handleRemoveEvidence = useCallback(
     (uri: string) => {
+      deletePhoto(uri);
       setItems((prev) =>
         prev.map((it, idx) =>
           idx === currentIndex
@@ -752,14 +852,18 @@ export default function ChecklistExecutionScreen() {
       notify('Erro', 'Sessão inválida. Faça login novamente.');
       return;
     }
-    if (!offlineMode && executionId == null) {
-      notify('Erro', 'Execução não inicializada.');
-      return;
-    }
 
     setSubmitting(true);
     try {
-      const endGps = await getCurrentCoordinates().catch(() => null);
+      // Localização obrigatória para finalizar.
+      let endGps: Coordinates;
+      try {
+        endGps = await getCurrentCoordinates();
+      } catch (err) {
+        setLocError(err instanceof Error ? err : new Error(String(err)));
+        setFinishAsk(true);
+        return;
+      }
 
       await enqueueInspection({
         inspectionId,
@@ -773,6 +877,10 @@ export default function ChecklistExecutionScreen() {
         completedAt: toLocalDateTime(),
         endGps,
       });
+
+      // Agora as respostas estão na fila: o rascunho não é mais necessário.
+      finalizedRef.current = true;
+      await clearDraft(user.id, inspectionId).catch(() => {});
 
       if (offlineMode) {
         notify(
@@ -829,11 +937,62 @@ export default function ChecklistExecutionScreen() {
       setCurrentIndex((i) => i + 1);
       scrollRef.current?.scrollTo({ y: 0, animated: false });
     } else {
-      submitChecklist();
+      // Antes de finalizar, pede a localização.
+      setLocError(null);
+      setFinishAsk(true);
+    }
+  }
+
+  async function acceptLocation(mode: 'start' | 'finish') {
+    setLocBusy(true);
+    setLocError(null);
+    try {
+      const coords = await getCurrentCoordinates();
+      if (mode === 'start') {
+        setConsentGps(coords);
+      } else {
+        setFinishAsk(false);
+        setLocBusy(false);
+        await submitChecklist();
+      }
+    } catch (err) {
+      setLocError(
+        err instanceof LocationError
+          ? err
+          : new Error('Não foi possível obter a localização.'),
+      );
+    } finally {
+      setLocBusy(false);
     }
   }
 
   // ── Guards ────────────────────────────────────────────────
+
+  // Consentimento de localização antes de abrir a inspeção.
+  if (!consentGps) {
+    return (
+      <LocationConsent
+        mode="start"
+        busy={locBusy}
+        error={locError}
+        onAccept={() => acceptLocation('start')}
+        onCancel={() => navigation.goBack()}
+      />
+    );
+  }
+
+  // Consentimento de localização antes de finalizar.
+  if (finishAsk && !submitting) {
+    return (
+      <LocationConsent
+        mode="finish"
+        busy={locBusy}
+        error={locError}
+        onAccept={() => acceptLocation('finish')}
+        onCancel={() => setFinishAsk(false)}
+      />
+    );
+  }
 
   // Carregando detalhe + iniciando execução
   if (loading) {
@@ -917,8 +1076,9 @@ export default function ChecklistExecutionScreen() {
         <View style={styles.offlineBanner}>
           <WifiOff size={16} color="#E65100" />
           <AppText style={styles.offlineBannerText}>
-            Sem conexão. Ao finalizar, a inspeção fica na fila para
-            sincronização.
+            {offlineReason ??
+              'Sem conexão. Ao finalizar, a inspeção fica na fila para ' +
+                'sincronização.'}
           </AppText>
         </View>
       )}

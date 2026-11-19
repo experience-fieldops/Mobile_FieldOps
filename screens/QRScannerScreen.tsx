@@ -18,6 +18,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import AppText from '../components/AppText';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { getEquipmentByQrCode } from '../services/equipmentService';
+import { isNetworkError } from '../services/api';
 import { useAuth } from '../context/AuthContext';
 
 type ScannerRouteProp = RouteProp<RootStackParamList, 'QRScanner'>;
@@ -33,6 +34,41 @@ export default function QRScannerScreen() {
   const [scanned, setScanned] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
+
+  // ── Leitura do QR code ───────────────────────────────────
+  // Resolve o equipamento no backend a partir do conteúdo lido e, se
+  // válido e ativo, segue para a execução do checklist da inspeção.
+  const handleBarCodeScanned = useCallback(
+    async ({ data }: BarcodeScanningResult) => {
+      if (scanned || resolving) return;
+      setScanned(true);
+      setScanError(null);
+
+      if (!token) {
+        setScanError('Sessão inválida. Faça login novamente.');
+        return;
+      }
+
+      setResolving(true);
+      try {
+        const equipment = await getEquipmentByQrCode(token, data);
+
+        if (equipment.status !== 'ACTIVE') {
+          setScanError(
+            `Equipamento "${equipment.name}" não está ativo (${equipment.status}).`,
+          );
+          return;
+        }
+
+        navigation.replace('ChecklistExecution', { inspectionId });
+      } catch {
+        setScanError('QR code não reconhecido. Tente novamente.');
+      } finally {
+        setResolving(false);
+      }
+    },
+    [scanned, resolving, token, inspectionId, navigation],
+  );
 
   // ── Permissão ainda não solicitada ───────────────────────
   if (!permission) {
@@ -78,41 +114,6 @@ export default function QRScannerScreen() {
       </View>
     );
   }
-
-  // ── Leitura do QR code ───────────────────────────────────
-  // Resolve o equipamento no backend a partir do conteúdo lido e, se
-  // válido e ativo, segue para a execução do checklist da inspeção.
-  const handleBarCodeScanned = useCallback(
-    async ({ data }: BarcodeScanningResult) => {
-      if (scanned || resolving) return;
-      setScanned(true);
-      setScanError(null);
-
-      if (!token) {
-        setScanError('Sessão inválida. Faça login novamente.');
-        return;
-      }
-
-      setResolving(true);
-      try {
-        const equipment = await getEquipmentByQrCode(token, data);
-
-        if (equipment.status !== 'ACTIVE') {
-          setScanError(
-            `Equipamento "${equipment.name}" não está ativo (${equipment.status}).`,
-          );
-          return;
-        }
-
-        navigation.replace('ChecklistExecution', { inspectionId });
-      } catch {
-        setScanError('QR code não reconhecido. Tente novamente.');
-      } finally {
-        setResolving(false);
-      }
-    },
-    [scanned, resolving, token, inspectionId, navigation],
-  );
 
   // Permite tentar de novo após erro de leitura.
   function rescan() {

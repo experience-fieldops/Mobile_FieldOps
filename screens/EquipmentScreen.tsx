@@ -9,7 +9,6 @@ import {
   RefreshControl,
 } from 'react-native';
 import {
-  WifiOff,
   ClipboardList,
   RefreshCw,
   User,
@@ -21,6 +20,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 
 import AppText from '../components/AppText';
+import NetworkStatus from '../components/NetworkStatus';
 import { MainTabParamList } from '../navigation/AppNavigator';
 import { getAssignedInspections } from '../services/inspectionService';
 import { getEquipmentsBySite } from '../services/equipmentService';
@@ -174,10 +174,7 @@ export default function EquipmentScreen() {
           <AppText style={styles.headerBrandField}>FIELD </AppText>
           <AppText style={styles.headerBrandOps}>OPS</AppText>
         </AppText>
-        <View style={styles.offlineContainer}>
-          <AppText style={styles.offlineText}>Modo Offline</AppText>
-          <WifiOff size={18} color="#E53935" style={styles.offlineIcon} />
-        </View>
+        <NetworkStatus />
       </View>
 
       {/* ── Título ──────────────────────────────────────── */}

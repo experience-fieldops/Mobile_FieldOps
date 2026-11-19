@@ -10,6 +10,7 @@ import {
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
+import NetInfo from '@react-native-community/netinfo';
 
 import { User } from '../types/user';
 import { authenticate } from '../services/authService';
@@ -57,16 +58,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         const session = JSON.parse(raw) as StoredSession;
 
+        // Sessão vencida (o token dura 24h): com internet, pede novo login.
+        // Sem internet, mantém a sessão para o técnico continuar acessando as
+        // inspeções salvas no aparelho (o envio da fila pede novo login).
         const valid =
           typeof session.token === 'string' &&
           session.token.length > 0 &&
           typeof session.expiresAt === 'number' &&
-          Date.now() < session.expiresAt &&
           session.user != null;
 
         if (!valid) {
           await SecureStore.deleteItemAsync(SESSION_KEY);
           return;
+        }
+
+        if (session.expiresAt <= Date.now()) {
+          const net = await NetInfo.fetch();
+          const online =
+            net.isConnected === true && net.isInternetReachable !== false;
+          if (online) {
+            await SecureStore.deleteItemAsync(SESSION_KEY);
+            return;
+          }
         }
 
         if (mounted) {

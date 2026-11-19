@@ -126,9 +126,11 @@ export function mapInspection(
     status:
       dto.status === 'IN_PROGRESS'
         ? 'Em Andamento'
-        : overdue
-          ? 'Atrasada'
-          : mapStatus(dto.status),
+        : dto.status === 'REJECTED'
+          ? 'Devolvida'
+          : overdue
+            ? 'Atrasada'
+            : mapStatus(dto.status),
     assignee: dto.assignedToName,
     equipment: dto.equipmentName ?? '—',
     // TODO(D-06): backend não expõe tempo estimado.

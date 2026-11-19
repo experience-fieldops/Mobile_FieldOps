@@ -10,6 +10,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.fieldops.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -27,10 +28,11 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "O FieldOps usa sua localização para registrar onde a inspeção foi executada."
+          "locationAlwaysAndWhenInUsePermission": "O FieldOps usa sua localizaÃ§Ã£o para registrar onde a inspeÃ§Ã£o foi executada."
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-sqlite"
     ]
   }
 }

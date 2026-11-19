@@ -178,6 +178,10 @@ async function request<T>(
 
   const safeEndpoint = getSafeEndpoint(endpoint);
   const startTime = Date.now();
+  // Vira true quando o servidor responde. Uma falha antes disso é falta de
+  // conexão, qualquer que seja a classe do erro (no celular o Expo usa o
+  // expo/fetch, que lança FetchError; no navegador é TypeError).
+  let responded = false;
 
   try {
     // 4. Enviar requisição.
@@ -195,6 +199,7 @@ async function request<T>(
       headers,
       signal: controller.signal,
     });
+    responded = true;
 
     if (__DEV__) {
       console.log('[API] Resposta recebida:', {
@@ -302,13 +307,13 @@ async function request<T>(
       throw new Error('Requisição cancelada.');
     }
 
-    // 11. Tratar falhas de rede.
-    if (error instanceof TypeError) {
+    // 11. Tratar falhas de rede: o fetch falhou sem resposta do servidor.
+    if (!responded || error instanceof TypeError) {
       if (__DEV__) {
         console.warn('[API] Falha de conexão:', {
           origin: SAFE_ORIGIN,
           endpoint: safeEndpoint,
-          reason: error.message,
+          reason: error instanceof Error ? error.message : String(error),
           durationMs: Date.now() - startTime,
         });
       }

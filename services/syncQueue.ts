@@ -1,7 +1,7 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Platform } from 'react-native';
+import { outboxGet, outboxList, outboxPut, outboxRemove } from './outboxStore';
 
 import { ChecklistItem } from '../data/inspections';
+import { deletePhoto, persistPhoto } from './photoStore';
 import { mapSeverity, toChecklistResponseRequest } from '../data/mappers';
 import { getHttpStatus, isNetworkError } from './api';
 import { uploadEvidence } from './evidenceService';
@@ -65,8 +65,6 @@ export type SyncResult =
   | { status: 'offline'; message: string }
   | { status: 'error'; message: string };
 
-const queueKey = (userId: number) => `fieldops:queue:${userId}`;
-
 // ── Datas ─────────────────────────────────────────────────────
 
 /** Data/hora local sem fuso (yyyy-MM-ddTHH:mm:ss). */
@@ -103,60 +101,40 @@ function notify() {
 
 export async function getQueue(userId: number): Promise<QueuedInspection[]> {
   try {
-    const raw = await AsyncStorage.getItem(queueKey(userId));
-    return raw ? (JSON.parse(raw) as QueuedInspection[]) : [];
+    return await outboxList<QueuedInspection>(userId);
   } catch {
     return [];
   }
-}
-
-async function saveQueue(
-  userId: number,
-  queue: QueuedInspection[],
-): Promise<void> {
-  await AsyncStorage.setItem(queueKey(userId), JSON.stringify(queue));
-  notify();
 }
 
 export async function getQueuedInspection(
   userId: number,
   inspectionId: number,
 ): Promise<QueuedInspection | null> {
-  const queue = await getQueue(userId);
-  return queue.find((q) => q.inspectionId === inspectionId) ?? null;
+  try {
+    return await outboxGet<QueuedInspection>(userId, inspectionId);
+  } catch {
+    return null;
+  }
 }
 
 async function updateEntry(entry: QueuedInspection): Promise<void> {
-  const queue = await getQueue(entry.userId);
-  const idx = queue.findIndex((q) => q.inspectionId === entry.inspectionId);
-  if (idx >= 0) queue[idx] = entry;
-  else queue.push(entry);
-  await saveQueue(entry.userId, queue);
+  await outboxPut(
+    entry.userId,
+    entry.inspectionId,
+    {
+      status: entry.status,
+      lastError: entry.lastError,
+      queuedAt: entry.queuedAt,
+    },
+    entry,
+  );
+  notify();
 }
 
 async function removeEntry(userId: number, inspectionId: number) {
-  const queue = await getQueue(userId);
-  await saveQueue(
-    userId,
-    queue.filter((q) => q.inspectionId !== inspectionId),
-  );
-}
-
-// ── Fotos no web ──────────────────────────────────────────────
-
-/**
- * No web, a foto escolhida tem um endereço blob: temporário, que some ao
- * recarregar a página. Converte para data URL para sobreviver na fila.
- */
-async function persistableUri(uri: string): Promise<string> {
-  if (Platform.OS !== 'web' || !uri.startsWith('blob:')) return uri;
-  const blob = await (await fetch(uri)).blob();
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
+  await outboxRemove(userId, inspectionId);
+  notify();
 }
 
 /** Hash curto (djb2) para identificar uma foto sem guardar o conteúdo. */
@@ -182,7 +160,7 @@ export async function enqueueInspection(
   for (const it of data.items) {
     const evidences = [];
     for (const ev of it.evidences) {
-      evidences.push({ ...ev, uri: await persistableUri(ev.uri) });
+      evidences.push({ ...ev, uri: await persistPhoto(ev.uri) });
     }
     items.push({ ...it, evidences } as ChecklistItem);
   }
@@ -326,6 +304,10 @@ async function syncEntry(
   try {
     await processEntry(token, entry);
     await removeEntry(entry.userId, entry.inspectionId);
+    // Enviada: libera as fotos guardadas no aparelho.
+    for (const it of entry.items) {
+      for (const ev of it.evidences) await deletePhoto(ev.uri);
+    }
     return { status: 'synced' };
   } catch (err) {
     const message =
@@ -333,6 +315,8 @@ async function syncEntry(
 
     // Sem conexão: continua na fila, sem marcar erro.
     if (isNetworkError(err)) {
+      entry.lastError = message;
+      await updateEntry(entry);
       return { status: 'offline', message };
     }
 

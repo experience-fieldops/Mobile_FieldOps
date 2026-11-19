@@ -9,7 +9,6 @@ import {
   RefreshControl,
 } from 'react-native';
 import {
-  WifiOff,
   ClipboardList,
   RefreshCw,
   User,
@@ -21,9 +20,10 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 
 import AppText from '../components/AppText';
+import NetworkStatus from '../components/NetworkStatus';
 import { MainTabParamList } from '../navigation/AppNavigator';
 import { getAssignedInspections } from '../services/inspectionService';
-import { isNetworkError } from '../services/api';
+import { getHttpStatus, isNetworkError } from '../services/api';
 import { getQueue, subscribeQueue, syncQueue } from '../services/syncQueue';
 import { useIsOnline } from '../services/network';
 import { formatDateBR } from '../data/mappers';
@@ -174,7 +174,7 @@ export default function SyncScreen() {
         code: q.code,
         title: q.title,
         savedAt: formatLocalDateTime(q.completedAt),
-        error: q.status === 'error' ? q.lastError : undefined,
+        error: q.lastError,
       })),
     );
   }, [user]);
@@ -228,6 +228,12 @@ export default function SyncScreen() {
         if (isNetworkError(err)) {
           // Sem conexão: a fila continua visível; só enviadas/aprovadas
           // ficam indisponíveis.
+          setBackendOffline(true);
+        } else if (getHttpStatus(err) === 401) {
+          setSyncMessage(
+            'Sessão expirada. Faça login novamente (Perfil → Sair da conta) ' +
+              'para enviar a fila.',
+          );
           setBackendOffline(true);
         } else {
           const message =
@@ -288,12 +294,7 @@ export default function SyncScreen() {
           <AppText style={styles.headerBrandField}>FIELD </AppText>
           <AppText style={styles.headerBrandOps}>OPS</AppText>
         </AppText>
-        {showOffline ? (
-          <View style={styles.offlineContainer}>
-            <AppText style={styles.offlineText}>Modo Offline</AppText>
-            <WifiOff size={18} color="#E53935" style={styles.offlineIcon} />
-          </View>
-        ) : null}
+        <NetworkStatus />
       </View>
 
       {/* ── Título + Subtítulo ──────────────────────────── */}
@@ -424,6 +425,8 @@ export default function SyncScreen() {
           style={styles.tabItem}
           activeOpacity={0.7}
           onPress={() => navigation.navigate('Inspeções')}
+          accessibilityRole="tab"
+          accessibilityLabel="Inspeções"
         >
           <ClipboardList size={22} color="#888" />
           <AppText style={styles.tabLabel}>INSPEÇÕES</AppText>
@@ -436,6 +439,8 @@ export default function SyncScreen() {
           style={styles.tabItem}
           activeOpacity={0.7}
           onPress={() => navigation.navigate('Perfil')}
+          accessibilityRole="tab"
+          accessibilityLabel="Perfil"
         >
           <User size={22} color="#888" />
           <AppText style={styles.tabLabel}>PERFIL</AppText>

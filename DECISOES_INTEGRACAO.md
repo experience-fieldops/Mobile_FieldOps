@@ -216,17 +216,33 @@ chamadas do fluxo online mantém todos os dados no mesmo modelo.
   o `LocalDateTime.parse` do backend aceita; `toISOString()` (com `Z`) era
   ignorado e virava a hora do servidor.
 
+**Ajustes após teste no celular.**
+- **GPS com prazo:** sem internet o GPS do Android pode não responder; a tela
+  esperava indefinidamente ao abrir e ao finalizar. Agora há prazo de 10 s e,
+  depois, a última posição conhecida. Sem posição, a execução é criada no
+  envio com a posição do fim.
+- **Rascunho:** as respostas são gravadas no aparelho a cada alteração
+  (`services/draftStore.ts`) e restauradas ao reabrir, mesmo após fechar o app.
+- **Fotos permanentes:** no celular são copiadas para
+  `Documentos/fieldops-evidence` (`expo-file-system`) ao anexar e apagadas
+  depois do envio (`services/photoStore.ts`).
+- **Sessão vencida:** o token dura 24 h. A sessão salva não é mais apagada ao
+  vencer: o técnico continua usando as inspeções salvas; o envio pede novo
+  login.
+- **Reenvio:** além da volta da conexão, tenta a cada 30 s com conexão e
+  quando o app volta ao primeiro plano.
+- **Indicador de rede** (`components/NetworkStatus.tsx`) nas telas de
+  Inspeções, Sincronização, Perfil e Equipamentos: "Modo Offline" em vermelho
+  sem internet, "Online" em verde com internet.
+
 **Limitações conhecidas.**
 - Só abre offline o que foi baixado antes: a lista precisa ter sido carregada
   com internet depois da atribuição.
 - Login exige internet. Para abrir o app offline no celular, a sessão precisa
   estar salva ("Lembrar-me"). No web a sessão não é persistida.
-- O token expira; se expirar durante o período offline, o envio pede novo login.
-- Fotos no celular ficam no endereço do image-picker (cache do app); se o
-  sistema limpar o cache antes do envio, a foto se perde. No web são
-  convertidas em data URL (limite de ~5 MB do localStorage).
-- GPS de início: se não houver posição ao abrir offline, usa a do fim; sem
-  nenhuma, o envio falha com motivo claro.
+- No web as fotos viram data URL (limite de ~5 MB do localStorage).
+- O indicador usa a rede do aparelho; um backend fora do ar com internet
+  ativa aparece como "Online" (as telas detectam a falha e usam a cópia local).
 - Se o técnico mudar um item de Inconforme para outro valor após a NC já ter
   sido enviada, a NC não é desfeita.
 
@@ -251,3 +267,19 @@ device sem internet.
 ---
 
 *Documento vivo — atualizar a cada módulo ou quando uma decisão for revista.*
+
+## Offline: armazenamento e upload no celular
+
+- **SQLite.** A fila de envio é a tabela `outbox` (`services/outboxStore.ts`),
+  com uma linha por usuário e inspeção. Rascunhos e cópias das inspeções usam
+  `expo-sqlite/kv-store` (`services/kvStorage.ts`). No web, que não tem SQLite
+  estável, as mesmas APIs usam o AsyncStorage (arquivos `.web.ts`). Uma fila
+  antiga no AsyncStorage é importada para o SQLite no primeiro uso.
+- **Upload de foto no celular.** O `fetch` do Expo (`expo/fetch`) não aceita
+  `FormData` com `{ uri, name, type }` e falha antes de sair a requisição. Como
+  isso acontece sem resposta do servidor, o app tratava como "sem conexão" e a
+  inspeção ficava na fila. Agora a parte do arquivo é enviada com `bytes()`,
+  lido pelo `expo-file-system`.
+- **Localização obrigatória.** Sem localização compartilhada, a inspeção não
+  inicia nem finaliza. O consentimento é pedido antes de abrir e antes de
+  finalizar.
